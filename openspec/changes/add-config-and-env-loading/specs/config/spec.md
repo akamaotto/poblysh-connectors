@@ -60,10 +60,9 @@ Validation (MVP):
 - THEN startup fails with an error explaining the invalid address
 
 ### Requirement: Redacted Config Logging
-The system SHOULD log the loaded configuration at debug level with sensitive fields redacted.
+The system SHALL log the loaded configuration at debug level with sensitive fields redacted.
 
 #### Scenario: Secrets redacted
 - GIVEN the config contains secret-like fields (e.g., `*_KEY`, `*_SECRET`, `*_TOKEN`, `DATABASE_URL` password)
 - WHEN debug logging is enabled
 - THEN those values are redacted in logs (e.g., `****`)
-
