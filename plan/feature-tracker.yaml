@@ -1,0 +1,224 @@
+meta:
+  project: "Poblysh Connectors"
+  version: "v0.1"
+  updated: "2025-10-31"
+  owner: "TBD"
+  statuses: ["todo", "in_progress", "blocked", "review", "done", "deferred"]
+  priorities: ["P0", "P1", "P2", "P3"]
+
+sprints:
+  - id: "W1"
+    start: "2025-11-03"
+    end: "2025-11-07"
+    goal: "Core API + Swagger + DB schema + provider registry"
+    deliverables: ["F-CORE-API", "F-DB-SCHEMA", "F-PROVIDER-REG"]
+  - id: "W2"
+    start: "2025-11-10"
+    end: "2025-11-14"
+    goal: "GitHub & Jira connectors"
+    deliverables: ["F-GITHUB", "F-JIRA"]
+  - id: "W3"
+    start: "2025-11-17"
+    end: "2025-11-21"
+    goal: "Google Drive & Calendar connectors"
+    deliverables: ["F-GDRIVE", "F-GCAL"]
+  - id: "W4"
+    start: "2025-11-24"
+    end: "2025-11-28"
+    goal: "Gmail & Zoho connectors"
+    deliverables: ["F-GMAIL", "F-ZCLI", "F-ZMAIL"]
+  - id: "W5"
+    start: "2025-12-01"
+    end: "2025-12-05"
+    goal: "Sync jobs + background runner + reliability"
+    deliverables: ["F-SYNC-RUNNER", "F-RATE-LIMIT", "F-RETRY-ERR"]
+  - id: "W6"
+    start: "2025-12-08"
+    end: "2025-12-12"
+    goal: "Local dev environment + secrets + docs"
+    deliverables: ["F-LOCAL-ENV", "F-LOCAL-SECRETS", "F-DOCS"]
+
+features:
+  - id: "F-CORE-API"
+    title: "Axum API skeleton + utoipa Swagger"
+    type: "feature"
+    sprint: "W1"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 5
+    acceptance_criteria:
+      - "Server boots and serves /docs (Swagger UI)"
+      - "Routes scaffolded for providers, connections, sync, webhooks, jobs, signals"
+  - id: "F-DB-SCHEMA"
+    title: "Postgres schema for providers, connections, sync_jobs, signals"
+    type: "feature"
+    sprint: "W1"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 3
+    acceptance_criteria:
+      - "Migrations apply cleanly"
+      - "Indices for common queries"
+  - id: "F-PROVIDER-REG"
+    title: "Provider registry + Connector trait"
+    type: "feature"
+    sprint: "W1"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 2
+    acceptance_criteria:
+      - "Connector trait defined with authorize, exchange_token, refresh_token, sync, handle_webhook"
+      - "Registry resolves provider by name"
+  - id: "F-GITHUB"
+    title: "GitHub: OAuth, webhook, incremental sync"
+    type: "feature"
+    sprint: "W2"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 8
+    dependencies: ["F-CORE-API", "F-DB-SCHEMA", "F-PROVIDER-REG", "F-LOCAL-SECRETS"]
+    acceptance_criteria:
+      - "Webhook signature verified (X-Hub-Signature-256)"
+      - "Events: push, pull_request, release produce Signals"
+      - "Backfill via REST; cursor on updated_at"
+  - id: "F-JIRA"
+    title: "Jira: OAuth, webhook, incremental sync"
+    type: "feature"
+    sprint: "W2"
+    status: "todo"
+    priority: "P1"
+    owner: "eng"
+    estimate: 8
+    acceptance_criteria:
+      - "Webhook filters for issue events"
+      - "Signals: issue_created, issue_updated, issue_status_changed"
+  - id: "F-GDRIVE"
+    title: "Google Drive: watch + poll fallback"
+    type: "feature"
+    sprint: "W3"
+    status: "todo"
+    priority: "P1"
+    owner: "eng"
+    estimate: 8
+    acceptance_criteria:
+      - "Watch channel lifecycle managed (renewals)"
+      - "Signals: file_created, file_updated"
+  - id: "F-GCAL"
+    title: "Google Calendar: watch"
+    type: "feature"
+    sprint: "W3"
+    status: "todo"
+    priority: "P2"
+    owner: "eng"
+    estimate: 5
+    acceptance_criteria:
+      - "Signals: event_created, event_updated"
+  - id: "F-GMAIL"
+    title: "Gmail: Pub/Sub push with optional poll fallback"
+    type: "feature"
+    sprint: "W4"
+    status: "todo"
+    priority: "P1"
+    owner: "eng"
+    estimate: 8
+    acceptance_criteria:
+      - "Pub/Sub JWT validated"
+      - "Signals: email_sent, email_received"
+  - id: "F-ZCLI"
+    title: "Zoho Cliq: webhook integration"
+    type: "feature"
+    sprint: "W4"
+    status: "todo"
+    priority: "P2"
+    owner: "eng"
+    estimate: 5
+    acceptance_criteria:
+      - "Webhook secret validation"
+      - "Signals: message_posted, reaction_added"
+  - id: "F-ZMAIL"
+    title: "Zoho Mail: polling integration"
+    type: "feature"
+    sprint: "W4"
+    status: "todo"
+    priority: "P2"
+    owner: "eng"
+    estimate: 5
+    acceptance_criteria:
+      - "Polling window + dedupe"
+      - "Signals: email_sent, email_received"
+  - id: "F-SYNC-RUNNER"
+    title: "Background job scheduler/executor with backoff"
+    type: "feature"
+    sprint: "W5"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 8
+    acceptance_criteria:
+      - "Interval triggers + webhook triggered jobs"
+      - "3x exponential backoff; rate limit reschedule"
+  - id: "F-RATE-LIMIT"
+    title: "Centralized provider rate limit policy"
+    type: "story"
+    sprint: "W5"
+    status: "todo"
+    priority: "P1"
+    owner: "eng"
+    estimate: 3
+  - id: "F-RETRY-ERR"
+    title: "Error handling + retries + logging"
+    type: "story"
+    sprint: "W5"
+    status: "todo"
+    priority: "P1"
+    owner: "eng"
+    estimate: 3
+  - id: "F-LOCAL-ENV"
+    title: "Local dev environment (scripts + .env)"
+    type: "feature"
+    sprint: "W6"
+    status: "todo"
+    priority: "P0"
+    owner: "eng"
+    estimate: 3
+    acceptance_criteria:
+      - "Local Postgres running (homebrew or manual)"
+      - "API boots on localhost with /docs"
+      - "Migrations runnable via CLI script (no Docker)"
+  - id: "F-LOCAL-SECRETS"
+    title: "Local secrets & crypto key management"
+    type: "feature"
+    sprint: "W6"
+    status: "todo"
+    priority: "P0"
+    owner: "security"
+    estimate: 3
+    acceptance_criteria:
+      - "Tokens encrypted with AES-GCM using local CRYPTO_KEY"
+      - "Key rotation tested locally by replacing env and re-encrypting"
+  - id: "F-DOCS"
+    title: "Documentation polished (PRD, Tech Spec, API)"
+    type: "story"
+    sprint: "W6"
+    status: "in_progress"
+    priority: "P1"
+    owner: "tpm"
+    estimate: 2
+
+risks:
+  - id: "R-WEBHOOK-RELIABILITY"
+    description: "Missed or delayed webhook deliveries"
+    mitigation: "Periodic incremental backfills + replay via cursor"
+    owners: ["eng"]
+  - id: "R-RATE-LIMITS"
+    description: "Provider rate limits cause gaps"
+    mitigation: "Central backoff; reschedule; adaptive concurrency"
+    owners: ["eng"]
+  - id: "R-TOKEN-EXPIRY"
+    description: "Expired tokens disrupt syncs"
+    mitigation: "Background refresh + on-demand refresh on 401"
+    owners: ["security", "eng"]
