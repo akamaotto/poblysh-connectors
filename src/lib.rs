@@ -7,5 +7,7 @@ pub mod config;
 pub mod db;
 pub mod handlers;
 pub mod models;
+pub mod repositories;
+pub mod seeds;
 pub mod server;
 pub use migration;

@@ -5,7 +5,7 @@
 use crate::handlers::root;
 use crate::models::ServiceInfo;
 use crate::server::AppState;
-use axum::{response::Json, extract::State};
+use axum::{extract::State, response::Json};
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
 
@@ -15,7 +15,7 @@ async fn test_root_handler_returns_success() {
     let db = DatabaseConnection::default();
     let state = AppState { db };
     let state = State(state);
-    
+
     // Call root handler
     let response = root(state).await;
 
@@ -29,7 +29,7 @@ async fn test_root_handler_returns_expected_service_info() {
     let db = DatabaseConnection::default();
     let state = AppState { db };
     let state = State(state);
-    
+
     // Call root handler
     let response = root(state).await;
 
@@ -49,7 +49,7 @@ async fn test_root_handler_returns_valid_json() {
     let db = DatabaseConnection::default();
     let state = AppState { db };
     let state = State(state);
-    
+
     // Call root handler
     let response = root(state).await;
 

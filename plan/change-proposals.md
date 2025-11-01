@@ -12,6 +12,8 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 8) add-providers-endpoint — `GET /providers` returns registry metadata.
 9) add-connector-trait-and-registry — Trait + in-memory registry wiring.
 10) add-connections-list-endpoint — `GET /connections` (tenant scoped).
+
+
 11) add-oauth-start-endpoint — `POST /connect/{provider}` returns authorize URL.
 12) add-oauth-callback-endpoint — `GET /connect/{provider}/callback` token exchange.
 13) add-local-token-encryption — AES-GCM with `POBLYSH_CRYPTO_KEY`.

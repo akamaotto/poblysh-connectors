@@ -4,7 +4,7 @@
 
 use crate::models::ServiceInfo;
 use crate::server::AppState;
-use axum::{response::Json, extract::State};
+use axum::{extract::State, response::Json};
 
 /// Root handler that returns basic service information
 #[utoipa::path(

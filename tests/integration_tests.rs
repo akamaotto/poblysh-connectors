@@ -1,11 +1,11 @@
 //! Basic integration tests for the Connectors API HTTP surface.
 
-use connectors::server::{create_app, AppState};
+use connectors::server::{AppState, create_app};
 use reqwest::Client;
+use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use sea_orm::DatabaseConnection;
 
 /// Helper function to get a random available port
 async fn get_available_port() -> u16 {

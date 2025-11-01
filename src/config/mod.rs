@@ -64,7 +64,7 @@ fn default_log_level() -> String {
 }
 
 fn default_database_url() -> String {
-    "postgresql://localhost/poblysh".to_string()
+    "postgresql://akamaotto:TheP%4055w0rd%21@localhost:5432/connectors".to_string()
 }
 
 fn default_db_max_connections() -> u32 {

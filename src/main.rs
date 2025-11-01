@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize database connection
     let db = db::init_pool(&config).await?;
-    
+
     // Handle CLI commands
     if let Some(command) = cli.command {
         match command {
@@ -57,7 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run migrations automatically for local and test profiles
     if config.profile == "local" || config.profile == "test" {
-        println!("Running migrations automatically for profile: {}", config.profile);
+        println!(
+            "Running migrations automatically for profile: {}",
+            config.profile
+        );
         Migrator::up(&db, None).await?;
         println!("Migrations completed successfully");
     }
@@ -91,13 +94,13 @@ async fn handle_migrate_command(
             println!("Checking migration status...");
             let applied = Migrator::get_applied_migrations(db).await?;
             let pending = Migrator::get_pending_migrations(db).await?;
-            
+
             if applied.is_empty() {
                 println!("No migrations have been applied");
             } else {
                 println!("Applied migrations: {} migration(s)", applied.len());
             }
-            
+
             if pending.is_empty() {
                 println!("No pending migrations");
             } else {

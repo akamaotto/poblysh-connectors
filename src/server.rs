@@ -3,9 +3,9 @@
 //! This module contains the server setup and configuration for the Connectors API.
 
 use axum::{Router, routing::get};
+use sea_orm::DatabaseConnection;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
-use sea_orm::DatabaseConnection;
 
 use crate::config::AppConfig;
 use crate::handlers;
@@ -25,7 +25,10 @@ pub fn create_app(state: AppState) -> Router {
 }
 
 /// Starts the server with the given configuration
-pub async fn run_server(config: AppConfig, db: DatabaseConnection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_server(
+    config: AppConfig,
+    db: DatabaseConnection,
+) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState { db };
     let app = create_app(state);
 

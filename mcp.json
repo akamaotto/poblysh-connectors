@@ -2,10 +2,7 @@
   "mcpServers": {
     "exa": {
       "command": "npx",
-      "args": [
-        "-y",
-        "exa-mcp-server"
-      ],
+      "args": ["-y", "exa-mcp-server"],
       "env": {
         "EXA_API_KEY": "33e9709a-ad5b-431d-892d-d20f414bbdd7"
       }
@@ -15,23 +12,13 @@
       "args": [
         "mcp-server-git",
         "--repository",
-        "/Users/akamaotto/code/teamwater/teamwater"
+        "/Users/akamaotto/code/connectors"
       ]
     },
-    "shadcn": {
-      "command": "yarn",
-      "args": [
-        "dlx",
-        "shadcn@latest",
-        "mcp"
-      ]
-    },
+
     "zai-vision": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@z_ai/mcp-server"
-      ],
+      "args": ["-y", "@z_ai/mcp-server"],
       "env": {
         "Z_AI_API_KEY": "2af99fa4a705430cbafbacd41166d0da.Ia6dRugMOrG5Nv3z",
         "Z_AI_MODE": "ZAI"
@@ -39,12 +26,7 @@
     },
     "brave-search": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@brave/brave-search-mcp-server",
-        "--transport",
-        "stdio"
-      ],
+      "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
       "env": {
         "BRAVE_API_KEY": "BSAarq2snCk3XmA0e65t_N7TmRie08r"
       }
@@ -58,37 +40,18 @@
         "ctx7sk-d4ebafd8-e506-4258-a4dc-21d2b345fbe0"
       ]
     },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp-server@latest",
-        "--transport",
-        "stdio"
-      ]
-    },
+
     "chrome-devtools": {
       "command": "npx",
-      "args": [
-        "chrome-devtools-mcp@latest"
-      ]
+      "args": ["chrome-devtools-mcp@latest"]
     },
     "cascade-thinking": {
       "command": "npx",
-      "args": [
-        "-y",
-        "cascade-thinking-mcp"
-      ]
+      "args": ["-y", "cascade-thinking-mcp"]
     },
     "time": {
       "command": "npx",
-      "args": [
-        "-y",
-        "time-mcp"
-      ]
+      "args": ["-y", "time-mcp"]
     }
-  },
-  "Better Auth": {
-    "url": "https://mcp.chonkie.ai/better-auth/better-auth-builder/mcp"
   }
 }

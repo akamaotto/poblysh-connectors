@@ -5,6 +5,12 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+pub mod connection;
+pub mod provider;
+
+pub use connection::Entity as Connection;
+pub use provider::Entity as Provider;
+
 /// Basic service information response
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServiceInfo {

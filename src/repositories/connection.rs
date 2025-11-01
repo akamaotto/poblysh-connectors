@@ -1,0 +1,298 @@
+//! Connection repository for database operations
+//!
+//! This module provides the ConnectionRepository struct which encapsulates
+//! SeaORM operations for the connections table with tenant-aware methods
+//! and cursor-based pagination.
+
+use anyhow::{Result, anyhow};
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::DateTimeWithTimeZone;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set,
+};
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::models::connection::{self, Entity as Connection};
+
+/// Repository for connection database operations
+#[derive(Debug, Clone)]
+pub struct ConnectionRepository {
+    /// Database connection pool
+    pub db: Arc<DatabaseConnection>,
+}
+
+impl ConnectionRepository {
+    /// Creates a new ConnectionRepository instance
+    pub fn new(db: Arc<DatabaseConnection>) -> Self {
+        Self { db }
+    }
+
+    /// Finds a connection by its ID within a tenant scope
+    pub async fn find_by_id(
+        &self,
+        tenant_id: &Uuid,
+        id: &Uuid,
+    ) -> Result<Option<connection::Model>> {
+        Ok(Connection::find_by_id(*id)
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .one(&*self.db)
+            .await?)
+    }
+
+    /// Retrieves a connection by its ID without tenant scoping
+    pub async fn get_by_id(&self, id: &Uuid) -> Result<Option<connection::Model>> {
+        Ok(Connection::find_by_id(*id).one(&*self.db).await?)
+    }
+
+    /// Lists all connections for a tenant ordered by creation time then ID
+    pub async fn find_by_tenant(&self, tenant_id: &Uuid) -> Result<Vec<connection::Model>> {
+        Ok(Connection::find()
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .order_by_asc(connection::Column::CreatedAt)
+            .order_by_asc(connection::Column::Id)
+            .all(&*self.db)
+            .await?)
+    }
+
+    /// Lists all connections for a tenant/provider pair ordered by creation time then ID
+    pub async fn find_by_tenant_and_provider(
+        &self,
+        tenant_id: &Uuid,
+        provider_slug: &str,
+    ) -> Result<Vec<connection::Model>> {
+        Ok(Connection::find()
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .filter(connection::Column::ProviderSlug.eq(provider_slug))
+            .order_by_asc(connection::Column::CreatedAt)
+            .order_by_asc(connection::Column::Id)
+            .all(&*self.db)
+            .await?)
+    }
+
+    /// Finds a connection by its unique `(tenant, provider, external_id)` tuple
+    pub async fn find_by_external_id(
+        &self,
+        tenant_id: &Uuid,
+        provider_slug: &str,
+        external_id: &str,
+    ) -> Result<Option<connection::Model>> {
+        Ok(Connection::find()
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .filter(connection::Column::ProviderSlug.eq(provider_slug))
+            .filter(connection::Column::ExternalId.eq(external_id))
+            .one(&*self.db)
+            .await?)
+    }
+
+    /// Alias for spec wording (`find_by_unique`)
+    pub async fn find_by_unique(
+        &self,
+        tenant_id: &Uuid,
+        provider_slug: &str,
+        external_id: &str,
+    ) -> Result<Option<connection::Model>> {
+        self.find_by_external_id(tenant_id, provider_slug, external_id)
+            .await
+    }
+
+    /// Creates a new connection record
+    pub async fn create(&self, connection: connection::ActiveModel) -> Result<connection::Model> {
+        let id = connection
+            .id
+            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("connection id must be set"))?;
+
+        let active = connection;
+        match active.save(&*self.db).await {
+            Ok(_) | Err(DbErr::RecordNotFound(_)) => {
+                let fetched = Connection::find_by_id(id).one(&*self.db).await?;
+                fetched.ok_or_else(|| anyhow!("connection not persisted"))
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Updates mutable fields on a connection within a tenant scope
+    pub async fn update_by_id(
+        &self,
+        tenant_id: &Uuid,
+        id: &Uuid,
+        update: connection::ActiveModel,
+    ) -> Result<connection::Model> {
+        let existing = Connection::find_by_id(*id)
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .one(&*self.db)
+            .await?
+            .ok_or_else(|| anyhow!("Connection with ID '{}' not found for tenant", id))?;
+
+        let mut model: connection::ActiveModel = existing.into();
+
+        if let Some(external_id) = update.external_id.clone().take() {
+            model.external_id = Set(external_id);
+        }
+        if let Some(display_name) = update.display_name.clone().take() {
+            model.display_name = Set(display_name);
+        }
+        if let Some(status) = update.status.clone().take() {
+            model.status = Set(status);
+        }
+        if let Some(access_cipher) = update.access_token_ciphertext.clone().take() {
+            model.access_token_ciphertext = Set(access_cipher);
+        }
+        if let Some(refresh_cipher) = update.refresh_token_ciphertext.clone().take() {
+            model.refresh_token_ciphertext = Set(refresh_cipher);
+        }
+        if let Some(expires_at) = update.expires_at.clone().take() {
+            model.expires_at = Set(expires_at);
+        }
+        if let Some(scopes) = update.scopes.clone().take() {
+            model.scopes = Set(scopes);
+        }
+        if let Some(metadata) = update.metadata.clone().take() {
+            model.metadata = Set(metadata);
+        }
+
+        Ok(model.update(&*self.db).await?)
+    }
+
+    /// Partial update helper for tokens/status/expiry mutations
+    pub async fn update_tokens_status(
+        &self,
+        id: &Uuid,
+        access_token_ciphertext: Option<Vec<u8>>,
+        refresh_token_ciphertext: Option<Vec<u8>>,
+        status: Option<String>,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<connection::Model> {
+        let existing = Connection::find_by_id(*id)
+            .one(&*self.db)
+            .await?
+            .ok_or_else(|| anyhow!("Connection '{}' not found", id))?;
+
+        let mut model: connection::ActiveModel = existing.into();
+
+        if let Some(cipher) = access_token_ciphertext {
+            model.access_token_ciphertext = Set(Some(cipher));
+        }
+        if let Some(cipher) = refresh_token_ciphertext {
+            model.refresh_token_ciphertext = Set(Some(cipher));
+        }
+        if let Some(status) = status {
+            model.status = Set(status);
+        }
+        if let Some(expires_at) = expires_at {
+            let fixed: DateTimeWithTimeZone = expires_at.into();
+            model.expires_at = Set(Some(fixed));
+        }
+
+        Ok(model.update(&*self.db).await?)
+    }
+
+    /// Deletes a connection within a tenant scope
+    pub async fn delete_by_id(&self, tenant_id: &Uuid, id: &Uuid) -> Result<()> {
+        let result = Connection::delete_by_id(*id)
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .exec(&*self.db)
+            .await?;
+
+        if result.rows_affected == 0 {
+            return Err(anyhow!("Connection with ID '{}' not found for tenant", id));
+        }
+
+        Ok(())
+    }
+
+    /// Lists connections with cursor pagination, returning the next cursor when available
+    pub async fn list_by_tenant_provider(
+        &self,
+        tenant_id: &Uuid,
+        provider_slug: &str,
+        limit: u64,
+        cursor: Option<String>,
+    ) -> Result<(Vec<connection::Model>, Option<String>)> {
+        if limit == 0 {
+            return Ok((Vec::new(), cursor));
+        }
+
+        let mut query = Connection::find()
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .filter(connection::Column::ProviderSlug.eq(provider_slug))
+            .order_by_asc(connection::Column::CreatedAt)
+            .order_by_asc(connection::Column::Id);
+
+        if let Some(cursor) = cursor {
+            if !cursor.is_empty() {
+                let (created_at, cursor_id) = parse_cursor(&cursor)?;
+                let condition = Condition::any()
+                    .add(connection::Column::CreatedAt.gt(created_at))
+                    .add(
+                        Condition::all()
+                            .add(connection::Column::CreatedAt.eq(created_at))
+                            .add(connection::Column::Id.gt(cursor_id)),
+                    );
+                query = query.filter(condition);
+            }
+        }
+
+        let mut rows = query.limit(limit + 1).all(&*self.db).await?;
+
+        let next_cursor = if rows.len() as u64 > limit {
+            let overflow = rows.pop().expect("limit+1 ensures overflow row");
+            Some(build_cursor(&overflow.created_at, overflow.id)?)
+        } else {
+            None
+        };
+
+        Ok((rows, next_cursor))
+    }
+}
+
+fn parse_cursor(cursor: &str) -> Result<(DateTimeWithTimeZone, Uuid)> {
+    let (timestamp_str, id_str) = cursor
+        .split_once('|')
+        .ok_or_else(|| anyhow!("Invalid cursor format"))?;
+
+    let timestamp = DateTime::parse_from_rfc3339(timestamp_str)?;
+    let id = Uuid::parse_str(id_str)?;
+
+    Ok((timestamp.into(), id))
+}
+
+fn build_cursor(created_at: &DateTimeWithTimeZone, id: Uuid) -> Result<String> {
+    Ok(format!("{}|{}", created_at.to_rfc3339(), id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn build_cursor_formats_expected_string() {
+        let ts = Utc.with_ymd_and_hms(2024, 11, 1, 12, 0, 0).unwrap();
+        let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let cursor = build_cursor(&ts.into(), id).unwrap();
+        assert!(cursor.contains("2024-11-01T12:00:00"));
+        assert!(cursor.ends_with("11111111-1111-1111-1111-111111111111"));
+    }
+
+    #[test]
+    fn parse_cursor_roundtrips() {
+        let ts = Utc.with_ymd_and_hms(2024, 11, 1, 13, 30, 0).unwrap();
+        let id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+        let ts_fixed: DateTimeWithTimeZone = ts.into();
+        let cursor = build_cursor(&ts_fixed, id).unwrap();
+        let (parsed_ts, parsed_id) = parse_cursor(&cursor).unwrap();
+        assert_eq!(parsed_id, id);
+        assert_eq!(parsed_ts, ts_fixed);
+    }
+
+    #[test]
+    fn parse_cursor_invalid_format_errors() {
+        let err = parse_cursor("bad-cursor").unwrap_err();
+        assert!(err.to_string().contains("Invalid cursor"));
+    }
+}

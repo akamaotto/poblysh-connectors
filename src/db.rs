@@ -4,9 +4,13 @@
 //! connection pool to Postgres with configurable parameters.
 
 use anyhow::{Context, Result};
-use sea_orm::{Database, DatabaseConnection, ConnectOptions, ConnectionTrait};
+use sea_orm::{
+    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
+    Value,
+};
 use std::time::Duration;
 use tokio::time::sleep;
+use url::Url;
 
 use crate::config::AppConfig;
 
@@ -72,14 +76,47 @@ pub async fn init_pool(cfg: &AppConfig) -> Result<DatabaseConnection> {
     // Implement retry logic with exponential backoff
     let max_retries = 5;
     let mut retry_delay = Duration::from_millis(100);
+    let mut database_ready = false;
 
     for attempt in 1..=max_retries {
+        if !database_ready {
+            match ensure_database_exists(&cfg.database_url, cfg.db_acquire_timeout_ms).await {
+                Ok(_) => {
+                    database_ready = true;
+                }
+                Err(err) => {
+                    if let Some(db_error) = err.downcast_ref::<DatabaseError>() {
+                        if matches!(db_error, DatabaseError::InvalidConfiguration { .. }) {
+                            return Err(err);
+                        }
+                    }
+
+                    if attempt == max_retries {
+                        log::error!(
+                            "Failed to prepare database after {} attempts: {}",
+                            max_retries,
+                            err
+                        );
+                        return Err(err);
+                    }
+
+                    log::warn!(
+                        "Database preparation attempt {} failed: {}, retrying in {:?}",
+                        attempt,
+                        err,
+                        retry_delay
+                    );
+
+                    sleep(retry_delay).await;
+                    retry_delay *= 2;
+                    continue;
+                }
+            }
+        }
+
         match Database::connect(opt.clone()).await {
             Ok(conn) => {
-                log::info!(
-                    "Successfully connected to database (attempt {})",
-                    attempt
-                );
+                log::info!("Successfully connected to database (attempt {})", attempt);
                 return Ok(conn);
             }
             Err(e) => {
@@ -124,17 +161,96 @@ pub async fn init_pool(cfg: &AppConfig) -> Result<DatabaseConnection> {
 ///
 /// Returns `Ok(())` if the connection is healthy, or an error otherwise.
 pub async fn health_check(db: &DatabaseConnection) -> Result<()> {
-    use sea_orm::Statement;
-    
-    let stmt = Statement::from_string(
-        db.get_database_backend(),
-        "SELECT 1".to_string(),
-    );
-    
-    db.query_one(stmt).await
+    let stmt = Statement::from_string(db.get_database_backend(), "SELECT 1".to_string());
+
+    db.query_one(stmt)
+        .await
         .context("Database health check failed")?;
-    
+
     Ok(())
+}
+
+async fn ensure_database_exists(database_url: &str, acquire_timeout_ms: u64) -> Result<()> {
+    let parsed_url =
+        Url::parse(database_url).map_err(|error| DatabaseError::InvalidConfiguration {
+            message: format!("Invalid database URL: {error}"),
+        })?;
+
+    match parsed_url.scheme() {
+        "postgres" | "postgresql" => {}
+        _ => return Ok(()),
+    }
+
+    let db_name =
+        extract_database_name(&parsed_url).ok_or_else(|| DatabaseError::InvalidConfiguration {
+            message: "Database URL must specify a single database name segment".to_string(),
+        })?;
+
+    let mut admin_url = parsed_url.clone();
+    admin_url.set_path("/postgres");
+    admin_url.set_query(None);
+    admin_url.set_fragment(None);
+
+    let mut admin_opt = ConnectOptions::new(admin_url.to_string());
+    admin_opt
+        .max_connections(1)
+        .acquire_timeout(Duration::from_millis(acquire_timeout_ms))
+        .sqlx_logging(false);
+
+    let admin_conn = Database::connect(admin_opt)
+        .await
+        .map_err(|source| DatabaseError::ConnectionFailed { source })?;
+
+    let exists_stmt = Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT 1 FROM pg_database WHERE datname = $1",
+        vec![Value::from(db_name.clone())],
+    );
+
+    let database_exists = admin_conn
+        .query_one(exists_stmt)
+        .await
+        .map_err(|source| DatabaseError::ConnectionFailed { source })?
+        .is_some();
+
+    if !database_exists {
+        let create_stmt = Statement::from_string(
+            DatabaseBackend::Postgres,
+            format!("CREATE DATABASE {}", quote_identifier(&db_name)),
+        );
+
+        match admin_conn.execute(create_stmt).await {
+            Ok(_) => log::info!("Created database '{db_name}'"),
+            Err(err) if err.to_string().contains("already exists") => {
+                log::info!("Database '{db_name}' already exists");
+            }
+            Err(source) => {
+                return Err(DatabaseError::ConnectionFailed { source }.into());
+            }
+        }
+    }
+
+    admin_conn
+        .close()
+        .await
+        .map_err(|source| DatabaseError::ConnectionFailed { source })?;
+
+    Ok(())
+}
+
+fn extract_database_name(url: &Url) -> Option<String> {
+    let mut segments = url.path_segments()?;
+    let name = segments.next()?;
+
+    if name.is_empty() || segments.next().is_some() {
+        return None;
+    }
+
+    Some(name.to_string())
+}
+
+fn quote_identifier(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 #[cfg(test)]
@@ -148,7 +264,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(init_pool(&config));
-        
+
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().downcast::<DatabaseError>(),
