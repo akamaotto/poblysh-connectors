@@ -38,6 +38,7 @@ pub async fn setup_test_db() -> Result<DatabaseConnection> {
 /// # Returns
 ///
 /// Returns a Result containing an Arc-wrapped database connection
+#[allow(dead_code)]
 pub async fn setup_test_db_arc() -> Result<Arc<DatabaseConnection>> {
     let db = setup_test_db().await?;
     Ok(Arc::new(db))
@@ -53,6 +54,7 @@ pub async fn setup_test_db_arc() -> Result<Arc<DatabaseConnection>> {
 /// # Returns
 ///
 /// Returns a Result containing the tenant ID
+#[allow(dead_code)]
 pub async fn create_test_tenant(
     db: &DatabaseConnection,
     tenant_id: Option<uuid::Uuid>,
@@ -73,6 +75,7 @@ pub async fn create_test_tenant(
 }
 
 /// Inserts a provider row directly for testing.
+#[allow(dead_code)]
 pub async fn insert_provider(
     db: &DatabaseConnection,
     slug: &str,
@@ -91,6 +94,7 @@ pub async fn insert_provider(
 }
 
 /// Inserts a connection row directly for testing.
+#[allow(dead_code)]
 pub async fn insert_connection(
     db: &DatabaseConnection,
     id: Uuid,
