@@ -10,9 +10,9 @@ port = 8080
 # workers = 4  # Optional: number of worker threads
 
 [database]
-url = "postgresql://localhost/connectors"
+url = "postgresql://localhost/poblysh"
 max_connections = 10
-min_connections = 1
+acquire_timeout_ms = 5000
 
 [logging]
 level = "info"  # trace, debug, info, warn, error

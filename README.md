@@ -5,16 +5,40 @@ A Rust-based API service for managing connectors, built with Axum and featuring 
 ## Prerequisites
 
 - Rust toolchain (latest stable version recommended)
+- PostgreSQL database (for local development)
 
 ## Local Run
 
 To run the project locally:
 
 ```bash
+# Set up database (required for first run)
+export POBLYSH_DATABASE_URL="postgresql://username:password@localhost/database_name"
+
+# Run the service
 cargo run
 ```
 
 The server will start on the address specified by the `POBLYSH_API_BIND_ADDR` environment variable (default: `0.0.0.0:8080`).
+
+### Database Setup
+
+For local development, you'll need a PostgreSQL database. The service will automatically run migrations for `local` and `test` profiles.
+
+#### Using Docker (recommended)
+
+```bash
+# Start PostgreSQL container
+docker run --name postgres-dev \
+  -e POSTGRES_DB=poblysh \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  -d postgres:15
+
+# Set environment variable
+export POBLYSH_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/poblysh"
+```
 
 ## Configuration System
 
@@ -38,22 +62,52 @@ Configuration keys use the `POBLYSH_` prefix. The MVP fields are:
 - `POBLYSH_PROFILE` – active profile (`local` by default)
 - `POBLYSH_API_BIND_ADDR` – socket address to bind (`0.0.0.0:8080` by default)
 - `POBLYSH_LOG_LEVEL` – log verbosity (`info` by default)
+- `POBLYSH_DATABASE_URL` – PostgreSQL connection string (required)
+- `POBLYSH_DB_MAX_CONNECTIONS` – maximum database connections (default: 10)
+- `POBLYSH_DB_ACQUIRE_TIMEOUT_MS` – connection acquire timeout in milliseconds (default: 5000)
 
 Example:
 ```bash
 POBLYSH_PROFILE=test \
 POBLYSH_API_BIND_ADDR=127.0.0.1:3000 \
 POBLYSH_LOG_LEVEL=debug \
+POBLYSH_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/poblysh" \
 cargo run
 ```
 
 Configuration is logged at startup using a redacted JSON representation (no secrets in the current schema).
+
+## Database Migrations
+
+The service uses SeaORM migrations to manage database schema changes.
+
+### Automatic Migrations
+
+For `local` and `test` profiles, migrations run automatically on startup.
+
+### Manual Migrations
+
+For other profiles, use the CLI commands:
+
+```bash
+# Apply all pending migrations
+cargo run -- migrate up
+
+# Rollback the last migration
+cargo run -- migrate down
+
+# Check migration status
+cargo run -- migrate status
+```
 
 ## Environment Variables
 
 - `POBLYSH_PROFILE`: Configuration profile to use (default: `local`)
 - `POBLYSH_API_BIND_ADDR`: Address and port for the HTTP server (default: `0.0.0.0:8080`)
 - `POBLYSH_LOG_LEVEL`: Log verbosity (`trace`, `debug`, `info`, `warn`, `error`; default: `info`)
+- `POBLYSH_DATABASE_URL`: PostgreSQL connection string (required)
+- `POBLYSH_DB_MAX_CONNECTIONS`: Maximum database connections (default: 10)
+- `POBLYSH_DB_ACQUIRE_TIMEOUT_MS`: Connection acquire timeout in milliseconds (default: 5000)
 
 Examples:
 ```bash
@@ -63,8 +117,14 @@ POBLYSH_PROFILE=prod cargo run
 # Set API bind address
 POBLYSH_API_BIND_ADDR=127.0.0.1:3000 cargo run
 
-# Set both
-POBLYSH_PROFILE=prod POBLYSH_API_BIND_ADDR=127.0.0.1:3000 cargo run
+# Set database URL
+POBLYSH_DATABASE_URL="postgresql://user:pass@host:5432/db" cargo run
+
+# Set all
+POBLYSH_PROFILE=prod \
+POBLYSH_API_BIND_ADDR=127.0.0.1:3000 \
+POBLYSH_DATABASE_URL="postgresql://user:pass@host:5432/db" \
+cargo run
 ```
 
 ## Available Endpoints

@@ -82,9 +82,9 @@ Controls database connection settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `database.url` | String (secret) | `"postgresql://localhost/connectors"` | Database connection URL |
-| `database.max_connections` | Integer | `10` | Maximum number of database connections |
-| `database.min_connections` | Integer | `1` | Minimum number of database connections |
+| `database_url` | String (secret) | `"postgresql://localhost/poblysh"` | Database connection URL |
+| `db_max_connections` | Integer | `10` | Maximum number of database connections |
+| `db_acquire_timeout_ms` | Integer | `5000` | Connection acquire timeout in milliseconds |
 
 ### Logging Configuration
 
@@ -132,9 +132,9 @@ port = 8080
 workers = 4
 
 [database]
-url = "postgresql://localhost/connectors"
+url = "postgresql://localhost/poblysh"
 max_connections = 10
-min_connections = 1
+acquire_timeout_ms = 5000
 
 [logging]
 level = "info"
@@ -163,9 +163,9 @@ request_timeout = 30
     "workers": 4
   },
   "database": {
-    "url": "postgresql://localhost/connectors",
+    "url": "postgresql://localhost/poblysh",
     "max_connections": 10,
-    "min_connections": 1
+    "acquire_timeout_ms": 5000
   },
   "logging": {
     "level": "info",
@@ -197,9 +197,9 @@ server:
   workers: 4
 
 database:
-  url: "postgresql://localhost/connectors"
+  url: "postgresql://localhost/poblysh"
   max_connections: 10
-  min_connections: 1
+  acquire_timeout_ms: 5000
 
 logging:
   level: "info"
@@ -231,8 +231,9 @@ export POBLYSH_SERVER__PORT=3000
 export POBLYSH_SERVER__WORKERS=8
 
 # Database configuration
-export POBLYSH_DATABASE__URL=postgresql://user:pass@localhost/mydb
-export POBLYSH_DATABASE__MAX_CONNECTIONS=20
+export POBLYSH_DATABASE_URL=postgresql://user:pass@localhost/mydb
+export POBLYSH_DB_MAX_CONNECTIONS=20
+export POBLYSH_DB_ACQUIRE_TIMEOUT_MS=2000
 
 # Logging configuration
 export POBLYSH_LOGGING__LEVEL=debug
@@ -264,6 +265,8 @@ cargo run -- --host 127.0.0.1 --port 3000
 
 # Database configuration
 cargo run -- --database-url postgresql://user:pass@localhost/mydb
+cargo run -- --db-max-connections 20
+cargo run -- --db-acquire-timeout-ms 2000
 
 # Logging configuration
 cargo run -- --log-level debug

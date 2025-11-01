@@ -18,6 +18,12 @@ pub struct AppConfig {
     pub api_bind_addr: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default = "default_database_url")]
+    pub database_url: String,
+    #[serde(default = "default_db_max_connections")]
+    pub db_max_connections: u32,
+    #[serde(default = "default_db_acquire_timeout_ms")]
+    pub db_acquire_timeout_ms: u64,
 }
 
 impl Default for AppConfig {
@@ -26,6 +32,9 @@ impl Default for AppConfig {
             profile: default_profile(),
             api_bind_addr: default_api_bind_addr(),
             log_level: default_log_level(),
+            database_url: default_database_url(),
+            db_max_connections: default_db_max_connections(),
+            db_acquire_timeout_ms: default_db_acquire_timeout_ms(),
         }
     }
 }
@@ -52,6 +61,18 @@ fn default_api_bind_addr() -> String {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_database_url() -> String {
+    "postgresql://localhost/poblysh".to_string()
+}
+
+fn default_db_max_connections() -> u32 {
+    10
+}
+
+fn default_db_acquire_timeout_ms() -> u64 {
+    5000
 }
 
 /// Errors that can occur while loading configuration.
@@ -110,11 +131,26 @@ impl ConfigLoader {
             .remove("LOG_LEVEL")
             .filter(|v| !v.is_empty())
             .unwrap_or_else(default_log_level);
+        let database_url = layered
+            .remove("DATABASE_URL")
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(default_database_url);
+        let db_max_connections = layered
+            .remove("DB_MAX_CONNECTIONS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_db_max_connections);
+        let db_acquire_timeout_ms = layered
+            .remove("DB_ACQUIRE_TIMEOUT_MS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_db_acquire_timeout_ms);
 
         let config = AppConfig {
             profile,
             api_bind_addr,
             log_level,
+            database_url,
+            db_max_connections,
+            db_acquire_timeout_ms,
         };
 
         match config.bind_addr() {

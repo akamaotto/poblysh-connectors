@@ -1,10 +1,11 @@
 //! Basic integration tests for the Connectors API HTTP surface.
 
-use connectors::server::create_app;
+use connectors::server::{create_app, AppState};
 use reqwest::Client;
 use serde_json::Value;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use sea_orm::DatabaseConnection;
 
 /// Helper function to get a random available port
 async fn get_available_port() -> u16 {
@@ -19,7 +20,11 @@ async fn start_test_server() -> String {
     let port = get_available_port().await;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-    let app = create_app();
+    // Create a mock AppState for testing
+    let db = DatabaseConnection::default();
+    let state = AppState { db };
+
+    let app = create_app(state);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
     // Start the server in the background

@@ -4,6 +4,8 @@
 //! including handlers, models, and server configuration.
 
 pub mod config;
+pub mod db;
 pub mod handlers;
 pub mod models;
 pub mod server;
+pub use migration;

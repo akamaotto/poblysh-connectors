@@ -5,20 +5,29 @@
 use axum::{Router, routing::get};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+use sea_orm::DatabaseConnection;
 
 use crate::config::AppConfig;
 use crate::handlers;
 
+/// Application state containing shared resources
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DatabaseConnection,
+}
+
 /// Creates and configures the Axum application router
-pub fn create_app() -> Router {
+pub fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/", get(handlers::root))
+        .with_state(state)
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
 }
 
 /// Starts the server with the given configuration
-pub async fn run_server(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let app = create_app();
+pub async fn run_server(config: AppConfig, db: DatabaseConnection) -> Result<(), Box<dyn std::error::Error>> {
+    let state = AppState { db };
+    let app = create_app(state);
 
     // Resolve the configured bind address
     let addr = config
