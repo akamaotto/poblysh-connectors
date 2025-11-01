@@ -2,8 +2,8 @@
 //!
 //! This module contains all the HTTP endpoint handlers for the Connectors API.
 
-use axum::response::Json;
 use crate::models::ServiceInfo;
+use axum::response::Json;
 
 /// Root handler that returns basic service information
 #[utoipa::path(

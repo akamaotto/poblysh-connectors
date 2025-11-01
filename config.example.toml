@@ -1,0 +1,30 @@
+# Example configuration file for the Connectors API service
+# This file demonstrates the configuration structure and default values
+
+# Profile name (local, test, dev, prod)
+profile = "local"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+# workers = 4  # Optional: number of worker threads
+
+[database]
+url = "postgresql://localhost/connectors"
+max_connections = 10
+min_connections = 1
+
+[logging]
+level = "info"  # trace, debug, info, warn, error
+format = "json"  # json, text
+# file = "/var/log/connectors.log"  # Optional: log file path
+
+[auth]
+jwt_secret = "default-secret-change-in-production"
+jwt_expiry = 3600  # 1 hour in seconds
+refresh_token_expiry = 86400  # 24 hours in seconds
+
+[api]
+rate_limit = 100  # Optional: requests per minute
+cors_origins = ["http://localhost:3000"]
+request_timeout = 30  # seconds
