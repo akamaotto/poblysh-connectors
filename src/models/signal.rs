@@ -4,9 +4,9 @@
 //! which stores normalized events emitted by connectors.
 
 use super::connection::Entity as Connection;
+use sea_orm::ActiveModelBehavior;
 use sea_orm::entity::prelude::*;
 use sea_orm::prelude::DateTimeWithTimeZone;
-use sea_orm::ActiveModelBehavior;
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 

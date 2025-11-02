@@ -34,6 +34,7 @@ pub fn create_app(state: AppState) -> Router {
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .route("/protected/ping", get(handlers::protected_ping))
+        .route("/connections", get(handlers::connections::list_connections))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.config),
             auth_middleware,
@@ -81,6 +82,7 @@ pub async fn run_server(
         crate::handlers::ready,
         crate::handlers::protected_ping,
         crate::handlers::providers::list_providers,
+        crate::handlers::connections::list_connections,
     ),
     components(
         schemas(
@@ -90,6 +92,9 @@ pub async fn run_server(
             crate::handlers::ProtectedPingResponse,
             crate::handlers::providers::ProviderInfo,
             crate::handlers::providers::ProvidersResponse,
+            crate::handlers::connections::ConnectionInfo,
+            crate::handlers::connections::ConnectionsResponse,
+            crate::handlers::connections::ListConnectionsQuery,
         ),
     ),
     modifiers(&SecurityAddon),

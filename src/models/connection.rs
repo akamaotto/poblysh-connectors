@@ -4,9 +4,9 @@
 //! which stores tenant-scoped authorizations to external providers.
 
 use super::provider::Entity as Provider;
+use sea_orm::ActiveModelBehavior;
 use sea_orm::entity::prelude::*;
 use sea_orm::prelude::DateTimeWithTimeZone;
-use sea_orm::ActiveModelBehavior;
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 

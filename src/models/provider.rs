@@ -3,9 +3,9 @@
 //! This module contains the SeaORM entity model for the providers table,
 //! which serves as a global catalog of external service providers.
 
+use sea_orm::ActiveModelBehavior;
 use sea_orm::entity::prelude::*;
 use sea_orm::prelude::DateTimeWithTimeZone;
-use sea_orm::ActiveModelBehavior;
 
 /// Provider entity representing external service providers
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]

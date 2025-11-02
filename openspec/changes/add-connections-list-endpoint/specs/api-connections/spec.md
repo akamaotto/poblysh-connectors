@@ -8,15 +8,19 @@ The system SHALL expose `GET /connections` to list active connections for the sp
 
 #### Scenario: Missing tenant header returns 400
 - **WHEN** `X-Tenant-Id` is not provided
-- **THEN** respond `400` using the unified error envelope
+- **THEN** respond `400` using the unified error envelope `{ code: "VALIDATION_FAILED", message: "missing tenant header" }`
 
 #### Scenario: Unauthorized without bearer token
 - **WHEN** the `Authorization` header is missing or invalid
-- **THEN** respond `401` using the unified error envelope
+- **THEN** respond `401` using the unified error envelope `{ code: "UNAUTHORIZED", message: "invalid or missing authorization token" }`
 
 #### Scenario: Filter by provider
 - **WHEN** a `provider` query parameter is supplied (e.g., `?provider=github`)
 - **THEN** only connections for that provider are returned
+
+#### Scenario: Invalid provider returns 400
+- **WHEN** a `provider` query parameter does not match a known provider in the registry
+- **THEN** respond `400` using the unified error envelope `{ code: "VALIDATION_FAILED", message: "unknown provider" }`
 
 #### Scenario: Empty result returns empty list
 - **WHEN** the tenant has no connections (or none match the filter)

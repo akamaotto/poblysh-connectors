@@ -2,13 +2,15 @@
 //!
 //! This module contains all the HTTP endpoint handlers for the Connectors API.
 
+pub mod connections;
 pub mod providers;
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};
 use crate::error::ApiError;
 use crate::models::ServiceInfo;
 use crate::server::AppState;
-use axum::{extract::State, response::Json};
+use axum::{extract::State, http::StatusCode, response::Json};
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -56,10 +58,26 @@ impl Default for HealthResponse {
     ),
     tag = "health"
 )]
-pub async fn health(State(_state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
-    // In the future, we could add database health checks here
-    // For now, just return healthy status
-    Ok(Json(HealthResponse::default()))
+pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+    // Basic dependency check: database round-trip
+    let backend: DatabaseBackend = state.db.get_database_backend();
+    let stmt = Statement::from_string(backend, "SELECT 1");
+    match state.db.execute(stmt).await {
+        Ok(_) => Ok(Json(HealthResponse::default())),
+        Err(err) => {
+            // Map any dependency failure to 503 so OpenAPI remains accurate
+            let mut api_err = ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                "Dependency check failed",
+            );
+            api_err.details = Some(Box::new(serde_json::json!({
+                "component": "database",
+                "error": err.to_string(),
+            })));
+            Err(api_err)
+        }
+    }
 }
 
 /// Readiness check endpoint (public, no auth required)
@@ -72,10 +90,25 @@ pub async fn health(State(_state): State<AppState>) -> Result<Json<HealthRespons
     ),
     tag = "health"
 )]
-pub async fn ready(State(_state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
-    // In the future, we could add dependency checks here
-    // For now, just return ready status
-    Ok(Json(HealthResponse::default()))
+pub async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+    // Readiness requires core dependencies to be reachable. Check DB connectivity.
+    let backend: DatabaseBackend = state.db.get_database_backend();
+    let stmt = Statement::from_string(backend, "SELECT 1");
+    match state.db.execute(stmt).await {
+        Ok(_) => Ok(Json(HealthResponse::default())),
+        Err(err) => {
+            let mut api_err = ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                "Service not ready",
+            );
+            api_err.details = Some(Box::new(serde_json::json!({
+                "component": "database",
+                "error": err.to_string(),
+            })));
+            Err(api_err)
+        }
+    }
 }
 
 /// Response payload for protected ping endpoint
@@ -101,7 +134,7 @@ pub struct ProtectedPingResponse {
     tag = "operators"
 )]
 pub async fn protected_ping(
-    OperatorAuth: OperatorAuth,
+    _operator_auth: OperatorAuth,
     TenantExtension(tenant): TenantExtension,
 ) -> Result<Json<ProtectedPingResponse>, ApiError> {
     let response = ProtectedPingResponse {
