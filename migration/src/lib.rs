@@ -9,6 +9,7 @@ mod m2025_11_01_102700_create_providers;
 mod m2025_11_01_102800_create_connections;
 mod m2025_11_01_103000_create_signals;
 mod m2025_11_01_103100_create_sync_jobs;
+mod m2025_11_02_120000_create_oauth_states;
 
 pub struct Migrator;
 
@@ -21,6 +22,7 @@ impl MigratorTrait for Migrator {
             Box::new(m2025_11_01_102800_create_connections::Migration),
             Box::new(m2025_11_01_103000_create_signals::Migration),
             Box::new(m2025_11_01_103100_create_sync_jobs::Migration),
+            Box::new(m2025_11_02_120000_create_oauth_states::Migration),
         ]
     }
 }

@@ -92,10 +92,18 @@ async fn sync_jobs_table_created_with_correct_schema() -> Result<()> {
         "updated_at",
     ];
 
+    // Extract column names from the query results in the same order as returned by PRAGMA
+    let actual_columns: Vec<String> = columns
+        .iter()
+        .map(|row| {
+            row.try_get("", "name")
+                .unwrap_or_else(|_| "UNKNOWN".to_string())
+        })
+        .collect();
+
     assert_eq!(
-        columns.len(),
-        expected_columns.len(),
-        "sync_jobs table should have correct number of columns"
+        actual_columns, expected_columns,
+        "sync_jobs table should have correct column names and order"
     );
 
     Ok(())
@@ -148,8 +156,85 @@ async fn sync_job_indices_created_with_correct_ordering() -> Result<()> {
         "Should have at least 3 custom indexes for sync_jobs"
     );
 
-    // Similar to signals, the important thing is that the indexes exist
-    // SQLite will use them efficiently for queries with DESC ordering
+    // Validate column ordering and sort direction for each expected index
+    let expected_indexes: [(&str, &[(&str, bool)]); 3] = [
+        (
+            "idx_sync_jobs_status_scheduled_priority",
+            &[
+                ("status", false),
+                ("scheduled_at", false),
+                ("priority", true),
+            ],
+        ),
+        (
+            "idx_sync_jobs_tenant_provider_status_scheduled",
+            &[
+                ("tenant_id", false),
+                ("provider_slug", false),
+                ("status", false),
+                ("scheduled_at", false),
+            ],
+        ),
+        (
+            "idx_sync_jobs_connection_status_scheduled",
+            &[
+                ("connection_id", false),
+                ("status", false),
+                ("scheduled_at", false),
+            ],
+        ),
+    ];
+
+    for (index_name, expected_columns) in expected_indexes {
+        let stmt = Statement::from_string(
+            db.get_database_backend(),
+            format!("PRAGMA index_xinfo('{}')", index_name),
+        );
+        let info_rows = db.query_all(stmt).await?;
+
+        let mut actual_columns: Vec<(i64, String, bool)> = info_rows
+            .into_iter()
+            .filter_map(|row| {
+                let key: i64 = row.try_get("", "key").ok()?;
+                if key == 0 {
+                    return None;
+                }
+
+                let seqno: i64 = row.try_get("", "seqno").ok()?;
+                let name: String = row.try_get("", "name").ok()?;
+                let desc_flag: i64 = row.try_get("", "desc").unwrap_or(0);
+
+                Some((seqno, name, desc_flag != 0))
+            })
+            .collect();
+
+        actual_columns.sort_by_key(|(seqno, _, _)| *seqno);
+
+        assert_eq!(
+            actual_columns.len(),
+            expected_columns.len(),
+            "Index {index_name} should have {} columns",
+            expected_columns.len()
+        );
+
+        for (idx, ((_, actual_name, actual_desc), (expected_name, expected_desc))) in actual_columns
+            .into_iter()
+            .zip(expected_columns.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                actual_name, *expected_name,
+                "Index {index_name} column order mismatch at position {idx}"
+            );
+
+            assert_eq!(
+                actual_desc,
+                *expected_desc,
+                "Index {index_name} column '{expected_name}' should be {}",
+                if *expected_desc { "DESC" } else { "ASC" }
+            );
+        }
+    }
 
     Ok(())
 }

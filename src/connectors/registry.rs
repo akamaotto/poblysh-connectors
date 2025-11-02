@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use crate::connectors::{Connector, ProviderMetadata};
+use crate::connectors::{AuthType, Connector, ProviderMetadata};
 
 /// Error type for registry operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -19,7 +19,7 @@ static REGISTRY: OnceLock<Arc<RwLock<Registry>>> = OnceLock::new();
 
 /// Provider registry that stores connectors and their metadata
 pub struct Registry {
-    connectors: HashMap<String, Box<dyn Connector>>,
+    connectors: HashMap<String, Arc<dyn Connector>>,
     metadata: HashMap<String, ProviderMetadata>,
 }
 
@@ -44,20 +44,42 @@ impl Registry {
 
         // Register example connector
         crate::connectors::example::register_example_connector(&mut reg);
+        // Register Jira connector
+        crate::connectors::jira::register_jira_connector(&mut reg);
+        // Register Google Drive connector
+        crate::connectors::google_drive::register_google_drive_connector(&mut reg);
     }
 
     /// Register a new provider with its connector and metadata
-    pub fn register(&mut self, connector: Box<dyn Connector>, metadata: ProviderMetadata) {
+    pub fn register(&mut self, connector: Arc<dyn Connector>, metadata: ProviderMetadata) {
         let name = metadata.name.clone();
         self.connectors.insert(name.clone(), connector);
         self.metadata.insert(name, metadata);
     }
 
+    /// Get only OAuth2 providers for OAuth flows
+    pub fn get_oauth_providers(&self) -> Vec<ProviderMetadata> {
+        self.metadata
+            .values()
+            .filter(|metadata| matches!(metadata.auth_type, AuthType::OAuth2))
+            .cloned()
+            .collect()
+    }
+
+    /// Check if a provider supports OAuth2 flows
+    pub fn is_oauth_provider(&self, name: &str) -> bool {
+        if let Some(metadata) = self.metadata.get(name) {
+            matches!(metadata.auth_type, AuthType::OAuth2)
+        } else {
+            false
+        }
+    }
+
     /// Get a connector by provider name
-    pub fn get(&self, name: &str) -> Result<&dyn Connector, RegistryError> {
+    pub fn get(&self, name: &str) -> Result<Arc<dyn Connector>, RegistryError> {
         self.connectors
             .get(name)
-            .map(|c| c.as_ref())
+            .cloned()
             .ok_or_else(|| RegistryError::ProviderNotFound {
                 name: name.to_string(),
             })
@@ -189,7 +211,7 @@ mod tests {
 
         // Register a known provider
         registry.register(
-            Box::new(TestConnector),
+            Arc::new(TestConnector),
             ProviderMetadata::new(
                 "test-provider".to_string(),
                 crate::connectors::AuthType::OAuth2,
@@ -222,7 +244,7 @@ mod tests {
 
         // Register providers in non-alphabetical order
         registry.register(
-            Box::new(TestConnector),
+            Arc::new(TestConnector),
             ProviderMetadata::new(
                 "zebra".to_string(),
                 crate::connectors::AuthType::OAuth2,
@@ -231,7 +253,7 @@ mod tests {
             ),
         );
         registry.register(
-            Box::new(TestConnector),
+            Arc::new(TestConnector),
             ProviderMetadata::new(
                 "apple".to_string(),
                 crate::connectors::AuthType::OAuth2,
@@ -240,7 +262,7 @@ mod tests {
             ),
         );
         registry.register(
-            Box::new(TestConnector),
+            Arc::new(TestConnector),
             ProviderMetadata::new(
                 "banana".to_string(),
                 crate::connectors::AuthType::OAuth2,
@@ -267,7 +289,7 @@ mod tests {
             true,
         );
 
-        registry.register(Box::new(TestConnector), provider_metadata.clone());
+        registry.register(Arc::new(TestConnector), provider_metadata.clone());
 
         // Test get_metadata returns complete data
         let retrieved = registry.get_metadata("test-provider").unwrap();

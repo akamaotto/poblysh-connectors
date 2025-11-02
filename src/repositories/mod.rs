@@ -4,7 +4,9 @@
 //! for database entities, providing a clean API for data access with tenant-aware methods.
 
 pub mod connection;
+pub mod oauth_state;
 pub mod provider;
 
 pub use connection::ConnectionRepository;
+pub use oauth_state::OAuthStateRepository;
 pub use provider::ProviderRepository;

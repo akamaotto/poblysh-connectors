@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
 
@@ -23,7 +24,7 @@ impl Connector for ExampleConnector {
         &self,
         params: AuthorizeParams,
     ) -> Result<Url, Box<dyn std::error::Error + Send + Sync>> {
-        // Stub implementation - return mock authorization URL
+        // Stub implementation - return mock authorization URL with HTTPS
         let mut url = Url::parse("https://example.com/oauth/authorize")?;
         url.query_pairs_mut()
             .append_pair("client_id", "example_client_id")
@@ -31,7 +32,7 @@ impl Connector for ExampleConnector {
                 "redirect_uri",
                 &params
                     .redirect_uri
-                    .unwrap_or_else(|| "http://localhost:3000/callback".to_string()),
+                    .unwrap_or_else(|| "https://localhost:3000/callback".to_string()),
             )
             .append_pair(
                 "state",
@@ -153,6 +154,6 @@ pub fn register_example_connector(registry: &mut Registry) {
         true, // webhooks supported
     );
 
-    let connector = Box::new(ExampleConnector);
+    let connector = Arc::new(ExampleConnector);
     registry.register(connector, metadata);
 }

@@ -72,6 +72,53 @@ impl ApiError {
     }
 }
 
+fn is_unique_violation(error: &sea_orm::DbErr) -> bool {
+    use sea_orm::RuntimeErr;
+
+    const PG_UNIQUE: &str = "23505";
+    const MYSQL_DUPLICATE_CODES: &[&str] = &["1022", "1062", "1169", "1586"];
+    const SQLITE_DUPLICATE_CODES: &[&str] = &["1555", "2067"];
+
+    let runtime_err = match error {
+        sea_orm::DbErr::Query(RuntimeErr::SqlxError(sqlx_err))
+        | sea_orm::DbErr::Exec(RuntimeErr::SqlxError(sqlx_err)) => sqlx_err,
+        _ => return false,
+    };
+
+    let Some(db_error) = runtime_err.as_database_error() else {
+        return false;
+    };
+
+    if db_error.is_unique_violation() {
+        return true;
+    }
+
+    if let Some(code) = db_error.code() {
+        let code_str = code.as_ref();
+        if code_str == PG_UNIQUE
+            || MYSQL_DUPLICATE_CODES.contains(&code_str)
+            || SQLITE_DUPLICATE_CODES.contains(&code_str)
+        {
+            return true;
+        }
+
+        if let Ok(code_number) = code_str.parse::<u32>()
+            && (MYSQL_DUPLICATE_CODES
+                .iter()
+                .filter_map(|value| value.parse::<u32>().ok())
+                .any(|known| known == code_number)
+                || SQLITE_DUPLICATE_CODES
+                    .iter()
+                    .filter_map(|value| value.parse::<u32>().ok())
+                    .any(|known| known == code_number))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Standard error types with predefined status codes
 #[derive(Debug, Error)]
 pub enum ErrorType {
@@ -199,6 +246,11 @@ impl From<JsonRejection> for ApiError {
 
 impl From<sea_orm::DbErr> for ApiError {
     fn from(error: sea_orm::DbErr) -> Self {
+        if is_unique_violation(&error) {
+            tracing::debug!(?error, "Unique constraint violation detected");
+            return Self::new(StatusCode::CONFLICT, "CONFLICT", "Resource already exists");
+        }
+
         match error {
             sea_orm::DbErr::RecordNotFound(record) => Self::new(
                 StatusCode::NOT_FOUND,
@@ -206,19 +258,20 @@ impl From<sea_orm::DbErr> for ApiError {
                 &format!("Record not found: {}", record),
             ),
             sea_orm::DbErr::Query(query_err) => {
-                // Check for unique constraint violations
-                if query_err.to_string().contains("unique constraint")
-                    || query_err.to_string().contains("duplicate key")
-                {
-                    Self::new(StatusCode::CONFLICT, "CONFLICT", "Resource already exists")
-                } else {
-                    tracing::error!("Database query error: {:?}", query_err);
-                    Self::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "INTERNAL_SERVER_ERROR",
-                        "Database error occurred",
-                    )
-                }
+                tracing::error!("Database query error: {:?}", query_err);
+                Self::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_SERVER_ERROR",
+                    "Database error occurred",
+                )
+            }
+            sea_orm::DbErr::Exec(exec_err) => {
+                tracing::error!("Database execution error: {:?}", exec_err);
+                Self::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_SERVER_ERROR",
+                    "Database error occurred",
+                )
             }
             sea_orm::DbErr::Conn(connection_err) => {
                 tracing::error!("Database connection error: {:?}", connection_err);
@@ -246,8 +299,9 @@ pub fn provider_error(provider: String, status: u16, body: Option<String>) -> Ap
         provider: provider.clone(),
         status,
         body_snippet: body.map(|b| {
-            if b.len() > 200 {
-                format!("{}...", &b[..200])
+            if b.chars().count() > 200 {
+                let truncated: String = b.chars().take(200).collect();
+                format!("{}...", truncated)
             } else {
                 b
             }
@@ -680,5 +734,41 @@ mod tests {
         println!(
             "✅ Implementation follows spec: 'Provider upstream HTTP errors → 502 PROVIDER_ERROR'"
         );
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation() {
+        // Test with multi-byte UTF-8 characters to ensure no panic on character boundaries
+        let test_string = "测试中文字符🚀 This is a test string with emoji and Chinese characters that should be truncated safely without panicking on UTF-8 boundaries. ".repeat(5);
+
+        let error = provider_error(
+            "test-provider".to_string(),
+            500,
+            Some(test_string.to_string()),
+        );
+
+        // Verify the error was created successfully (no panic)
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(error.code, Box::from("PROVIDER_ERROR"));
+
+        // Verify details contain the truncated body
+        assert!(error.details.is_some());
+        let details = error.details.unwrap();
+        let details_obj = details.as_object().unwrap();
+        let body_snippet = details_obj.get("body_snippet").unwrap().as_str().unwrap();
+
+        // Should be truncated to 200 characters (not bytes) and end with "..."
+        assert!(body_snippet.chars().count() <= 203); // 200 chars + "..."
+
+        // Check if it was truncated (original string was longer than 200 chars)
+        if test_string.chars().count() > 200 {
+            assert!(body_snippet.ends_with("..."));
+        }
+
+        // Verify the truncated string is valid UTF-8
+        let _valid_utf8 = body_snippet.to_string(); // This would panic if invalid UTF-8
+
+        // Verify it contains the beginning of our test string
+        assert!(body_snippet.starts_with("测试中文字符🚀 This is a test string"));
     }
 }

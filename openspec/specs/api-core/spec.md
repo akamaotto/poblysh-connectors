@@ -1,17 +1,26 @@
 # api-core Specification
 
 ## Purpose
-TBD - created by archiving change add-error-model-and-problem-json. Update Purpose after archive.
+This specification defines the core REST surface shared by all Poblysh connectors, detailing the foundational contracts such as error envelopes, authentication headers, and pagination primitives that other capabilities build upon. It targets backend service developers, integration partners, and API reviewers who rely on a stable definition of cross-cutting behaviors. The document aims to preserve long-term compatibility, enforce consistent security posture, and minimize breaking changes by clearly stating the mandatory guarantees for every endpoint within the public connectors API.
+
 ## Requirements
+
 ### Requirement: Unified Error Envelope
 The API SHALL return errors using a single JSON envelope with media type `application/problem+json`.
 
 Shape (MVP):
+
 - `code` (string, machine‑readable; e.g., `VALIDATION_FAILED`, `UNAUTHORIZED`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `PROVIDER_ERROR`, `INTERNAL_SERVER_ERROR`)
 - `message` (string, human‑readable debug message; safe to show to operators)
 - `details` (object, optional; key‑value metadata like field errors)
 - `retry_after` (integer, optional; seconds until retry is advised)
 - `trace_id` (string, optional; correlation ID for logs/traces)
+
+#### Details Structure
+- For validation errors, use a flat or nested object that maps field names to error messages (string), preserving dotted keys when helpful for deeply nested fields.
+- For provider errors, include an object `{ "provider": "<name>", "status": <http_code>, "upstream_error": "<message>" }` to surface upstream context.
+- All values in `details` MUST be JSON-serializable (strings, numbers, booleans, null, objects, arrays).
+- Error messages inside `details` SHALL be human-readable but NOT localized; clients are responsible for mapping stable keys to localized UI text.
 
 #### Scenario: Validation error returns 400 with details
 - GIVEN a request body fails validation for field `name`
