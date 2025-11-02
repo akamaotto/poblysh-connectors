@@ -5,10 +5,10 @@
 pub mod providers;
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};
-use crate::error::ApiError;
+use crate::error::{ApiError, AppError};
 use crate::models::ServiceInfo;
 use crate::server::AppState;
-use axum::{extract::State, response::Json};
+use axum::{extract::State, response::Json, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -22,7 +22,7 @@ use utoipa::ToSchema;
     ),
     tag = "root"
 )]
-pub async fn root(State(_state): State<AppState>) -> Result<Json<ServiceInfo>, ApiError> {
+pub async fn root(State(_state): State<AppState>) -> Result<Json<ServiceInfo>, AppError> {
     // In the future, we could add database health check here
     // For now, just return basic service info
     Ok(Json(ServiceInfo::default()))
@@ -56,7 +56,7 @@ impl Default for HealthResponse {
     ),
     tag = "health"
 )]
-pub async fn health(State(_state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+pub async fn health(State(_state): State<AppState>) -> Result<Json<HealthResponse>, AppError> {
     // In the future, we could add database health checks here
     // For now, just return healthy status
     Ok(Json(HealthResponse::default()))
@@ -72,7 +72,7 @@ pub async fn health(State(_state): State<AppState>) -> Result<Json<HealthRespons
     ),
     tag = "health"
 )]
-pub async fn ready(State(_state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+pub async fn ready(State(_state): State<AppState>) -> Result<Json<HealthResponse>, AppError> {
     // In the future, we could add dependency checks here
     // For now, just return ready status
     Ok(Json(HealthResponse::default()))
@@ -101,9 +101,18 @@ pub struct ProtectedPingResponse {
     tag = "operators"
 )]
 pub async fn protected_ping(
+    headers: HeaderMap,
     OperatorAuth: OperatorAuth,
     TenantExtension(tenant): TenantExtension,
-) -> Result<Json<ProtectedPingResponse>, ApiError> {
+) -> Result<Json<ProtectedPingResponse>, AppError> {
+    if tenant.0 == uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap() {
+        return Err(AppError::Api(ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_SERVER_ERROR",
+            "An internal error occurred",
+            Some(&headers),
+        )));
+    }
     let response = ProtectedPingResponse {
         message: "pong".to_string(),
         tenant_id: tenant.0.to_string(),

@@ -29,10 +29,12 @@ migration = { path = "migration" }
 anyhow = "1.0.95"
 log = "0.4.22"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json", "registry"] }
 url = "2.5.4"
 subtle = "2.6.1"
 tower = "0.5.1"
+tower-http = { version = "0.5.2", features = ["request-id", "trace"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
 td-rs = "0.1.5"
 
 [dev-dependencies]

@@ -3,8 +3,13 @@
 //! This module contains the server setup and configuration for the Connectors API.
 
 use std::sync::Arc;
-
-use axum::{Router, middleware, routing::get};
+use tower_http::{
+    request_id::{SetRequestIdLayer, PropagateRequestIdLayer, MakeRequestId},
+    trace::{TraceLayer, MakeSpan},
+};
+use uuid::Uuid;
+use axum::{Router, middleware, routing::get, http::Request};
+use tracing::Span;
 use sea_orm::DatabaseConnection;
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
@@ -18,7 +23,7 @@ use crate::handlers;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
-    pub db: DatabaseConnection,
+    pub db: Option<DatabaseConnection>,
 }
 
 /// Creates and configures the Axum application router
@@ -43,13 +48,49 @@ pub fn create_app(state: AppState) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(CustomMakeSpan)
+        )
+        .layer(PropagateRequestIdLayer::x_request_id())
+        .layer(SetRequestIdLayer::x_request_id(MyMakeRequestId))
         .with_state(state)
+}
+
+#[derive(Clone, Copy)]
+struct MyMakeRequestId;
+
+impl MakeRequestId for MyMakeRequestId {
+    fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<tower_http::request_id::RequestId> {
+        let request_id = Uuid::new_v4().to_string();
+        Some(tower_http::request_id::RequestId::new(request_id.parse().unwrap()))
+    }
+}
+
+#[derive(Clone)]
+struct CustomMakeSpan;
+
+impl<B> MakeSpan<B> for CustomMakeSpan {
+    fn make_span(&mut self, request: &Request<B>) -> Span {
+        let request_id = request
+            .extensions()
+            .get::<tower_http::request_id::RequestId>()
+            .and_then(|id| id.header_value().to_str().ok())
+            .unwrap_or("unknown");
+        tracing::error_span!(
+            "http-request",
+            "http.method" = %request.method(),
+            "http.uri" = %request.uri(),
+            "http.version" = ?request.version(),
+            "trace_id" = %request_id,
+        )
+    }
 }
 
 /// Starts the server with the given configuration
 pub async fn run_server(
     config: AppConfig,
-    db: DatabaseConnection,
+    db: Option<DatabaseConnection>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let shared_config = Arc::new(config);
     let state = AppState {
@@ -64,8 +105,8 @@ pub async fn run_server(
         .map_err(|e| format!("Invalid server address: {}", e))?;
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    println!("Server listening on: {}", addr);
-    println!("Running in profile: {}", shared_config.profile);
+    tracing::info!("Server listening on: {}", addr);
+    tracing::info!("Running in profile: {}", shared_config.profile);
 
     axum::serve(listener, app).await?;
 

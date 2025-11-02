@@ -36,14 +36,24 @@ pub struct ApiError {
 
 impl ApiError {
     /// Create a new API error with the given status code and message
-    pub fn new<S: Into<String>>(status: StatusCode, code: S, message: S) -> Self {
+    pub fn new<S: Into<String>>(
+        status: StatusCode,
+        code: S,
+        message: S,
+        headers: Option<&HeaderMap>,
+    ) -> Self {
+        let trace_id = headers
+            .and_then(|h| h.get("x-request-id"))
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
         Self {
             status,
             code: code.into(),
             message: message.into(),
             details: None,
             retry_after: None,
-            trace_id: Self::current_trace_id(),
+            trace_id,
         }
     }
 
@@ -57,19 +67,6 @@ impl ApiError {
     pub fn with_retry_after(mut self, seconds: u64) -> Self {
         self.retry_after = Some(seconds);
         self
-    }
-
-    /// Extract current trace ID from the active tracing span (falls back to generated correlation ID)
-    fn current_trace_id() -> Option<String> {
-        let current_span = tracing::Span::current();
-
-        if let Some(span_id) = current_span.id() {
-            return Some(format!("span-{}", span_id.into_u64()));
-        }
-
-        // Fallback: generate a correlation ID for basic client-server log correlation
-        // TODO: When OpenTelemetry is integrated, extract actual trace ID from request context
-        Some(format!("corr-{}", &uuid::Uuid::new_v4().to_string()[..8]))
     }
 }
 
@@ -158,91 +155,72 @@ impl IntoResponse for ApiError {
     }
 }
 
-// Error mappers for common sources
-
-impl From<ErrorType> for ApiError {
-    fn from(error_type: ErrorType) -> Self {
-        Self::new(
-            error_type.status_code(),
-            error_type.error_code(),
-            &error_type.to_string(),
-        )
-    }
-}
-
-impl From<anyhow::Error> for ApiError {
-    fn from(error: anyhow::Error) -> Self {
-        // Log the full error for debugging
-        tracing::error!("Internal error: {:?}", error);
-
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "INTERNAL_SERVER_ERROR",
-            "An internal error occurred",
-        )
-    }
-}
-
-impl From<JsonRejection> for ApiError {
-    fn from(rejection: JsonRejection) -> Self {
-        let message = match rejection {
-            JsonRejection::JsonDataError(err) => format!("Invalid JSON: {}", err),
-            JsonRejection::JsonSyntaxError(err) => format!("JSON syntax error: {}", err),
-            JsonRejection::MissingJsonContentType(_) => {
-                "Missing 'Content-Type: application/json' header".to_string()
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_code, message) = match self {
+            AppError::Api(err) => {
+                return err.into_response();
             }
-            _ => "Invalid request body".to_string(),
+            AppError::Anyhow(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                err.to_string(),
+            ),
+            AppError::Json(err) => (StatusCode::BAD_REQUEST, "VALIDATION_FAILED", err.to_string()),
+            AppError::Db(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                err.to_string(),
+            ),
         };
 
-        Self::new(StatusCode::BAD_REQUEST, "VALIDATION_FAILED", &message)
+        let mut api_error = ApiError::new(status, error_code, &message, None);
+
+        (api_error.status, axum::Json(api_error)).into_response()
     }
 }
 
-impl From<sea_orm::DbErr> for ApiError {
-    fn from(error: sea_orm::DbErr) -> Self {
-        match error {
-            sea_orm::DbErr::RecordNotFound(record) => Self::new(
-                StatusCode::NOT_FOUND,
-                "NOT_FOUND",
-                &format!("Record not found: {}", record),
-            ),
-            sea_orm::DbErr::Query(query_err) => {
-                // Check for unique constraint violations
-                if query_err.to_string().contains("unique constraint")
-                    || query_err.to_string().contains("duplicate key")
-                {
-                    Self::new(StatusCode::CONFLICT, "CONFLICT", "Resource already exists")
-                } else {
-                    tracing::error!("Database query error: {:?}", query_err);
-                    Self::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "INTERNAL_SERVER_ERROR",
-                        "Database error occurred",
-                    )
-                }
-            }
-            sea_orm::DbErr::Conn(connection_err) => {
-                tracing::error!("Database connection error: {:?}", connection_err);
-                Self::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "SERVICE_UNAVAILABLE",
-                    "Database service unavailable",
-                )
-            }
-            _ => {
-                tracing::error!("Database error: {:?}", error);
-                Self::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "INTERNAL_SERVER_ERROR",
-                    "Database error occurred",
-                )
-            }
-        }
+// Error mappers for common sources
+
+pub enum AppError {
+    Api(ApiError),
+    Anyhow(anyhow::Error),
+    Json(JsonRejection),
+    Db(sea_orm::DbErr),
+}
+
+impl From<ApiError> for AppError {
+    fn from(error: ApiError) -> Self {
+        AppError::Api(error)
     }
 }
+
+impl From<anyhow::Error> for AppError {
+    fn from(error: anyhow::Error) -> Self {
+        AppError::Anyhow(error)
+    }
+}
+
+impl From<JsonRejection> for AppError {
+    fn from(error: JsonRejection) -> Self {
+        AppError::Json(error)
+    }
+}
+
+impl From<sea_orm::DbErr> for AppError {
+    fn from(error: sea_orm::DbErr) -> Self {
+        AppError::Db(error)
+    }
+}
+
 
 /// Create a provider upstream error
-pub fn provider_error(provider: String, status: u16, body: Option<String>) -> ApiError {
+pub fn provider_error(
+    provider: String,
+    status: u16,
+    body: Option<String>,
+    headers: Option<&HeaderMap>,
+) -> ApiError {
     let provider_error = ProviderError {
         provider: provider.clone(),
         status,
@@ -264,25 +242,43 @@ pub fn provider_error(provider: String, status: u16, body: Option<String>) -> Ap
         api_status,
         api_code,
         &format!("Provider {} returned error status {}", provider, status),
+        headers,
     )
     .with_details(json!(provider_error))
 }
 
 /// Create an unauthorized error (401)
-pub fn unauthorized(message: Option<&str>) -> ApiError {
+pub fn unauthorized(message: Option<&str>, headers: Option<&HeaderMap>) -> AppError {
     let msg = message.unwrap_or("Authentication required");
-    ApiError::new(StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg)
+    AppError::Api(ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        "UNAUTHORIZED",
+        msg,
+        headers,
+    ))
 }
 
 /// Create a forbidden error (403)
-pub fn forbidden(message: Option<&str>) -> ApiError {
+pub fn forbidden(message: Option<&str>, headers: Option<&HeaderMap>) -> AppError {
     let msg = message.unwrap_or("Insufficient permissions");
-    ApiError::new(StatusCode::FORBIDDEN, "FORBIDDEN", msg)
+    AppError::Api(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "FORBIDDEN",
+        msg,
+        headers,
+    ))
 }
 
 /// Create a validation error with field details
-pub fn validation_error(message: &str, field_errors: serde_json::Value) -> ApiError {
-    ApiError::new(StatusCode::BAD_REQUEST, "VALIDATION_FAILED", message).with_details(field_errors)
+pub fn validation_error(
+    message: &str,
+    field_errors: serde_json::Value,
+    headers: Option<&HeaderMap>,
+) -> AppError {
+    AppError::Api(
+        ApiError::new(StatusCode::BAD_REQUEST, "VALIDATION_FAILED", message, headers)
+            .with_details(field_errors),
+    )
 }
 
 #[cfg(test)]
@@ -297,6 +293,7 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "VALIDATION_FAILED",
             "Test error message",
+            None,
         );
 
         assert_eq!(error.code, "VALIDATION_FAILED");
@@ -307,8 +304,9 @@ mod tests {
 
     #[test]
     fn test_api_error_with_details() {
-        let error = ApiError::new(StatusCode::BAD_REQUEST, "BAD_REQUEST", "Test error message")
-            .with_details(json!({"field": "value"}));
+        let error =
+            ApiError::new(StatusCode::BAD_REQUEST, "BAD_REQUEST", "Test error message", None)
+                .with_details(json!({"field": "value"}));
 
         assert_eq!(error.details, Some(json!({"field": "value"})));
     }
@@ -319,6 +317,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             "TOO_MANY_REQUESTS",
             "Rate limit exceeded",
+            None,
         )
         .with_retry_after(60);
 
@@ -349,6 +348,7 @@ mod tests {
             StatusCode::BAD_REQUEST,
             "VALIDATION_FAILED",
             "Invalid JSON content type",
+            None,
         );
 
         assert_eq!(api_error.code, "VALIDATION_FAILED");
@@ -378,7 +378,12 @@ mod tests {
 
     #[test]
     fn test_content_type_header() {
-        let error = ApiError::new(StatusCode::BAD_REQUEST, "VALIDATION_FAILED", "Test error");
+        let error = ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "Test error",
+            None,
+        );
 
         let response = error.into_response();
 
@@ -395,6 +400,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             "RATE_LIMITED",
             "Rate limit exceeded",
+            None,
         )
         .with_retry_after(60);
 
@@ -412,7 +418,12 @@ mod tests {
 
     #[test]
     fn test_status_code_preservation() {
-        let error = ApiError::new(StatusCode::CONFLICT, "CONFLICT", "Resource already exists");
+        let error = ApiError::new(
+            StatusCode::CONFLICT,
+            "CONFLICT",
+            "Resource already exists",
+            None,
+        );
 
         let response = error.into_response();
 
@@ -422,17 +433,17 @@ mod tests {
 
     #[test]
     fn test_trace_id_generation() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", "test-trace-id".parse().unwrap());
         let error = ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",
             "Test error",
+            Some(&headers),
         );
 
-        // Check that trace ID is generated and has the expected format
-        assert!(error.trace_id.is_some());
-        let trace_id = error.trace_id.unwrap();
-        assert!(trace_id.starts_with("corr-"));
-        assert_eq!(trace_id.len(), 13); // "corr-" + 8 chars
+        // Check that trace ID is extracted from the request
+        assert_eq!(error.trace_id, Some("test-trace-id".to_string()));
     }
 
     #[test]
@@ -491,23 +502,23 @@ mod tests {
     #[test]
     fn test_auth_error_helpers() {
         // Test unauthorized error
-        let auth_error = unauthorized(None);
+        let auth_error = unauthorized(None, None);
         assert_eq!(auth_error.status, StatusCode::UNAUTHORIZED);
         assert_eq!(auth_error.code, "UNAUTHORIZED");
         assert_eq!(auth_error.message, "Authentication required");
 
         // Test unauthorized error with custom message
-        let custom_auth_error = unauthorized(Some("Invalid token"));
+        let custom_auth_error = unauthorized(Some("Invalid token"), None);
         assert_eq!(custom_auth_error.message, "Invalid token");
 
         // Test forbidden error
-        let forbidden_error = forbidden(None);
+        let forbidden_error = forbidden(None, None);
         assert_eq!(forbidden_error.status, StatusCode::FORBIDDEN);
         assert_eq!(forbidden_error.code, "FORBIDDEN");
         assert_eq!(forbidden_error.message, "Insufficient permissions");
 
         // Test forbidden error with custom message
-        let custom_forbidden_error = forbidden(Some("Admin access required"));
+        let custom_forbidden_error = forbidden(Some("Admin access required"), None);
         assert_eq!(custom_forbidden_error.message, "Admin access required");
     }
 
@@ -518,7 +529,7 @@ mod tests {
             "email": "Invalid email format"
         });
 
-        let validation_error = validation_error("Validation failed", field_errors.clone());
+        let validation_error = validation_error("Validation failed", field_errors.clone(), None);
 
         assert_eq!(validation_error.status, StatusCode::BAD_REQUEST);
         assert_eq!(validation_error.code, "VALIDATION_FAILED");
@@ -529,10 +540,10 @@ mod tests {
     #[test]
     fn test_spec_scenarios_compliance() {
         // Scenario: Validation error returns 400 with details (matches spec)
-        let validation_err = validation_error("Validation failed", json!({"name": "required"}));
+        let validation_err = validation_error("Validation failed", json!({"name": "required"}), None);
         assert_eq!(validation_err.status, StatusCode::BAD_REQUEST);
         assert_eq!(validation_err.code, "VALIDATION_FAILED");
-        assert!(validation_err.trace_id.is_some());
+        assert!(validation_err.trace_id.is_none());
 
         // Scenario: Not found returns 404 (matches spec)
         let not_found_err: ApiError = ErrorType::NotFound.into();
@@ -545,6 +556,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             "RATE_LIMITED",
             "Rate limit exceeded",
+            None,
         )
         .with_retry_after(60);
         assert_eq!(rate_limit_err.status, StatusCode::TOO_MANY_REQUESTS);

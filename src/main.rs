@@ -3,7 +3,7 @@
 //! This is the main entry point for the Connectors API service.
 
 use clap::{Parser, Subcommand};
-use connectors::{config::ConfigLoader, db, server::run_server};
+use connectors::{config::ConfigLoader, db, server::run_server, logging};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::DatabaseConnection;
 
@@ -42,33 +42,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_loader = ConfigLoader::new();
     let config = config_loader.load()?;
 
+    // Initialize logging
+    logging::init_subscriber(&config);
+
     // Initialize database connection
-    let db = db::init_pool(&config).await?;
+    let db = if !config.database_url.is_empty() {
+        Some(db::init_pool(&config).await?)
+    } else {
+        None
+    };
 
     // Handle CLI commands
     if let Some(command) = cli.command {
-        match command {
-            Commands::Migrate { action } => {
-                handle_migrate_command(&db, action).await?;
-                return Ok(());
+        if let Some(db) = &db {
+            match command {
+                Commands::Migrate { action } => {
+                    handle_migrate_command(db, action).await?;
+                    return Ok(());
+                }
             }
         }
     }
 
     // Run migrations automatically for local and test profiles
-    if config.profile == "local" || config.profile == "test" {
-        println!(
-            "Running migrations automatically for profile: {}",
-            config.profile
-        );
-        Migrator::up(&db, None).await?;
-        println!("Migrations completed successfully");
+    if let Some(db) = &db {
+        if config.profile == "local" || config.profile == "test" {
+            tracing::info!(
+                "Running migrations automatically for profile: {}",
+                config.profile
+            );
+            Migrator::up(db, None).await?;
+            tracing::info!("Migrations completed successfully");
+        }
     }
 
     // Log the loaded configuration (no secrets in current schema)
-    println!("Loaded configuration for profile: {}", config.profile);
+    tracing::info!("Loaded configuration for profile: {}", config.profile);
     if let Ok(redacted_json) = config.redacted_json() {
-        println!("Configuration: {}", redacted_json);
+        tracing::info!("Configuration: {}", redacted_json);
     }
 
     // Start the server with the loaded configuration
@@ -81,30 +92,30 @@ async fn handle_migrate_command(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match action {
         MigrateAction::Up => {
-            println!("Applying migrations...");
+            tracing::info!("Applying migrations...");
             Migrator::up(db, None).await?;
-            println!("All migrations applied successfully");
+            tracing::info!("All migrations applied successfully");
         }
         MigrateAction::Down => {
-            println!("Rolling back last migration...");
+            tracing::info!("Rolling back last migration...");
             Migrator::down(db, Some(1)).await?;
-            println!("Migration rolled back successfully");
+            tracing::info!("Migration rolled back successfully");
         }
         MigrateAction::Status => {
-            println!("Checking migration status...");
+            tracing::info!("Checking migration status...");
             let applied = Migrator::get_applied_migrations(db).await?;
             let pending = Migrator::get_pending_migrations(db).await?;
 
             if applied.is_empty() {
-                println!("No migrations have been applied");
+                tracing::info!("No migrations have been applied");
             } else {
-                println!("Applied migrations: {} migration(s)", applied.len());
+                tracing::info!("Applied migrations: {} migration(s)", applied.len());
             }
 
             if pending.is_empty() {
-                println!("No pending migrations");
+                tracing::info!("No pending migrations");
             } else {
-                println!("Pending migrations: {} migration(s)", pending.len());
+                tracing::info!("Pending migrations: {} migration(s)", pending.len());
             }
         }
     }

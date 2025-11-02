@@ -17,7 +17,7 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::error::{ApiError, unauthorized, validation_error};
+use crate::error::{AppError, unauthorized, validation_error};
 use crate::server::AppState;
 
 /// Tenant ID wrapper for type safety
@@ -43,11 +43,11 @@ pub async fn auth_middleware(
     State(config): State<Arc<AppConfig>>,
     request: Request,
     next: Next,
-) -> Result<Response, ApiError> {
+) -> Result<Response, AppError> {
     let headers = request.headers().clone();
 
     let token = extract_bearer_token(&headers)?;
-    validate_token(&config, token)?;
+    validate_token(&config, token, &headers)?;
 
     let tenant = extract_tenant_id(&headers)?;
     tracing::info!(tenant_id = %tenant.0, "Authenticated operator request");
@@ -59,23 +59,26 @@ pub async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
+fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, AppError> {
     headers
         .get(AUTHORIZATION)
-        .ok_or_else(|| unauthorized(Some("Missing Authorization header")))
+        .ok_or_else(|| unauthorized(Some("Missing Authorization header"), Some(headers)))
         .and_then(|value| {
             value
                 .to_str()
-                .map_err(|_| unauthorized(Some("Invalid Authorization header")))
+                .map_err(|_| unauthorized(Some("Invalid Authorization header"), Some(headers)))
         })
         .and_then(|header| {
-            header
-                .strip_prefix("Bearer ")
-                .ok_or_else(|| unauthorized(Some("Authorization header must use Bearer scheme")))
+            header.strip_prefix("Bearer ").ok_or_else(|| {
+                unauthorized(
+                    Some("Authorization header must use Bearer scheme"),
+                    Some(headers),
+                )
+            })
         })
 }
 
-fn validate_token(config: &AppConfig, token: &str) -> Result<(), ApiError> {
+fn validate_token(config: &AppConfig, token: &str, headers: &HeaderMap) -> Result<(), AppError> {
     let is_valid = config
         .operator_tokens
         .iter()
@@ -84,17 +87,18 @@ fn validate_token(config: &AppConfig, token: &str) -> Result<(), ApiError> {
     if is_valid {
         Ok(())
     } else {
-        Err(unauthorized(Some("Invalid bearer token")))
+        Err(unauthorized(Some("Invalid bearer token"), Some(headers)))
     }
 }
 
-fn extract_tenant_id(headers: &HeaderMap) -> Result<TenantId, ApiError> {
+fn extract_tenant_id(headers: &HeaderMap) -> Result<TenantId, AppError> {
     let header_value = headers
         .get("X-Tenant-Id")
         .ok_or_else(|| {
             validation_error(
                 "Missing required header",
                 serde_json::json!({ "X-Tenant-Id": "Required header is missing" }),
+                Some(headers),
             )
         })?
         .to_str()
@@ -102,6 +106,7 @@ fn extract_tenant_id(headers: &HeaderMap) -> Result<TenantId, ApiError> {
             validation_error(
                 "Invalid tenant header",
                 serde_json::json!({ "X-Tenant-Id": "Header must be valid UTF-8" }),
+                Some(headers),
             )
         })?;
 
@@ -109,6 +114,7 @@ fn extract_tenant_id(headers: &HeaderMap) -> Result<TenantId, ApiError> {
         validation_error(
             "Invalid tenant ID",
             serde_json::json!({ "X-Tenant-Id": "Must be a valid UUID" }),
+            Some(headers),
         )
     })
 }
@@ -133,7 +139,7 @@ where
     Arc<AppConfig>: FromRef<S>,
     S: Sync,
 {
-    type Rejection = ApiError;
+    type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         parts
@@ -144,6 +150,7 @@ where
                 validation_error(
                     "Tenant context missing",
                     serde_json::json!({ "X-Tenant-Id": "Tenant context not present" }),
+                    Some(&parts.headers),
                 )
             })
     }
@@ -154,14 +161,19 @@ where
     Arc<AppConfig>: FromRef<S>,
     S: Sync,
 {
-    type Rejection = ApiError;
+    type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         parts
             .extensions
             .get::<OperatorAuth>()
             .copied()
-            .ok_or_else(|| unauthorized(Some("Operator authentication required")))
+            .ok_or_else(|| {
+                unauthorized(
+                    Some("Operator authentication required"),
+                    Some(&parts.headers),
+                )
+            })
     }
 }
 

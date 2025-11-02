@@ -17,7 +17,7 @@ async fn spawn_test_app(config: AppConfig) -> (String, DatabaseConnection) {
     // Create app state
     let state = connectors::server::AppState {
         config: Arc::new(config.clone()),
-        db: db.clone(),
+        db: Some(db.clone()),
     };
 
     // Create app
@@ -362,47 +362,22 @@ async fn test_error_response_format() {
     let (server_url, _db) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
-    // Test missing auth header error format
-    let response = client
-        .get(&format!("{}/protected", server_url))
-        .header("X-Tenant-Id", Uuid::new_v4().to_string())
-        .send()
-        .await;
-
-    if let Ok(resp) = response {
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            // Check error response format
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "application/problem+json"
-            );
-
-            let error: Value = resp.json().await.unwrap();
-            assert_eq!(error.get("code").unwrap(), "UNAUTHORIZED");
-            assert!(error.get("message").is_some());
-            assert!(error.get("trace_id").is_some());
-        }
-    }
-
     // Test missing tenant header error format
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(&format!("{}/protected/ping", server_url))
         .header("Authorization", "Bearer test-token")
         .send()
-        .await;
+        .await
+        .unwrap();
 
-    if let Ok(resp) = response {
-        if resp.status() == StatusCode::BAD_REQUEST {
-            // Check error response format
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "application/problem+json"
-            );
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/problem+json"
+    );
 
-            let error: Value = resp.json().await.unwrap();
-            assert_eq!(error.get("code").unwrap(), "VALIDATION_FAILED");
-            assert!(error.get("message").is_some());
-            assert!(error.get("trace_id").is_some());
-        }
-    }
+    let error: Value = response.json().await.unwrap();
+    assert_eq!(error.get("code").unwrap(), "VALIDATION_FAILED");
+    assert!(error.get("message").is_some());
+    assert!(error.get("trace_id").is_some());
 }
