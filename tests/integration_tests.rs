@@ -47,7 +47,7 @@ async fn test_root_endpoint() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/", server_url))
+        .get(format!("{}/", server_url))
         .send()
         .await
         .expect("Failed to execute request");
@@ -72,7 +72,7 @@ async fn test_openapi_endpoint() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/openapi.json", server_url))
+        .get(format!("{}/openapi.json", server_url))
         .send()
         .await
         .expect("Failed to execute request");

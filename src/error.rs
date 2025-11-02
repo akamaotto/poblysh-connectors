@@ -20,18 +20,17 @@ pub struct ApiError {
     #[serde(skip_serializing, skip_deserializing)]
     pub status: StatusCode,
     /// Error code for programmatic handling
-    pub code: String,
+    pub code: Box<str>,
     /// Human-readable error message
-    pub message: String,
+    pub message: Box<str>,
     /// Additional error details (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    pub details: Option<Box<serde_json::Value>>,
     /// Suggested retry delay in seconds (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u64>,
     /// Correlation trace ID for debugging (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
+    pub trace_id: Option<Box<str>>,
 }
 
 impl ApiError {
@@ -39,8 +38,8 @@ impl ApiError {
     pub fn new<S: Into<String>>(status: StatusCode, code: S, message: S) -> Self {
         Self {
             status,
-            code: code.into(),
-            message: message.into(),
+            code: code.into().into_boxed_str(),
+            message: message.into().into_boxed_str(),
             details: None,
             retry_after: None,
             trace_id: Self::current_trace_id(),
@@ -49,7 +48,7 @@ impl ApiError {
 
     /// Add details to the error
     pub fn with_details<V: Into<serde_json::Value>>(mut self, details: V) -> Self {
-        self.details = Some(details.into());
+        self.details = Some(Box::new(details.into()));
         self
     }
 
@@ -60,16 +59,16 @@ impl ApiError {
     }
 
     /// Extract current trace ID from the active tracing span (falls back to generated correlation ID)
-    fn current_trace_id() -> Option<String> {
+    fn current_trace_id() -> Option<Box<str>> {
         let current_span = tracing::Span::current();
 
         if let Some(span_id) = current_span.id() {
-            return Some(format!("span-{}", span_id.into_u64()));
+            return Some(format!("span-{}", span_id.into_u64()).into_boxed_str());
         }
 
         // Fallback: generate a correlation ID for basic client-server log correlation
         // TODO: When OpenTelemetry is integrated, extract actual trace ID from request context
-        Some(format!("corr-{}", &uuid::Uuid::new_v4().to_string()[..8]))
+        Some(format!("corr-{}", &uuid::Uuid::new_v4().to_string()[..8]).into_boxed_str())
     }
 }
 
@@ -148,10 +147,10 @@ impl IntoResponse for ApiError {
         );
 
         // Add Retry-After header if present
-        if let Some(retry_after) = self.retry_after {
-            if let Ok(header_value) = HeaderValue::from_str(&retry_after.to_string()) {
-                headers.insert("retry-after", header_value);
-            }
+        if let Some(retry_after) = self.retry_after
+            && let Ok(header_value) = HeaderValue::from_str(&retry_after.to_string())
+        {
+            headers.insert("retry-after", header_value);
         }
 
         (self.status, headers, axum::Json(self)).into_response()
@@ -299,8 +298,8 @@ mod tests {
             "Test error message",
         );
 
-        assert_eq!(error.code, "VALIDATION_FAILED");
-        assert_eq!(error.message, "Test error message");
+        assert_eq!(error.code, Box::from("VALIDATION_FAILED"));
+        assert_eq!(error.message, Box::from("Test error message"));
         assert_eq!(error.details, None);
         assert_eq!(error.retry_after, None);
     }
@@ -310,7 +309,7 @@ mod tests {
         let error = ApiError::new(StatusCode::BAD_REQUEST, "BAD_REQUEST", "Test error message")
             .with_details(json!({"field": "value"}));
 
-        assert_eq!(error.details, Some(json!({"field": "value"})));
+        assert_eq!(error.details, Some(Box::new(json!({"field": "value"}))));
     }
 
     #[test]
@@ -328,8 +327,8 @@ mod tests {
     #[test]
     fn test_error_type_mapping() {
         let not_found_error: ApiError = ErrorType::NotFound.into();
-        assert_eq!(not_found_error.code, "NOT_FOUND");
-        assert_eq!(not_found_error.message, "Not Found");
+        assert_eq!(not_found_error.code, Box::from("NOT_FOUND"));
+        assert_eq!(not_found_error.message, Box::from("Not Found"));
     }
 
     #[test]
@@ -337,8 +336,8 @@ mod tests {
         let anyhow_error = anyhow::anyhow!("Something went wrong");
         let api_error: ApiError = anyhow_error.into();
 
-        assert_eq!(api_error.code, "INTERNAL_SERVER_ERROR");
-        assert_eq!(api_error.message, "An internal error occurred");
+        assert_eq!(api_error.code, Box::from("INTERNAL_SERVER_ERROR"));
+        assert_eq!(api_error.message, Box::from("An internal error occurred"));
     }
 
     #[test]
@@ -351,7 +350,7 @@ mod tests {
             "Invalid JSON content type",
         );
 
-        assert_eq!(api_error.code, "VALIDATION_FAILED");
+        assert_eq!(api_error.code, Box::from("VALIDATION_FAILED"));
         assert!(api_error.message.contains("JSON"));
     }
 
@@ -364,7 +363,7 @@ mod tests {
         );
 
         // Per spec: ALL provider upstream errors return PROVIDER_ERROR with 502 status
-        assert_eq!(error.code, "PROVIDER_ERROR");
+        assert_eq!(error.code, Box::from("PROVIDER_ERROR"));
         assert_eq!(error.status, StatusCode::BAD_GATEWAY);
         assert!(error.message.contains("github"));
         assert!(error.details.is_some());
@@ -446,12 +445,12 @@ mod tests {
             Some("service unavailable".to_string()),
         );
         assert_eq!(error_5xx.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(error_5xx.code, "PROVIDER_ERROR");
+        assert_eq!(error_5xx.code, Box::from("PROVIDER_ERROR"));
 
         // 4xx errors should ALSO return 502 (per spec: all provider upstream errors)
         let error_4xx = provider_error("slack".to_string(), 401, Some("invalid token".to_string()));
         assert_eq!(error_4xx.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(error_4xx.code, "PROVIDER_ERROR");
+        assert_eq!(error_4xx.code, Box::from("PROVIDER_ERROR"));
 
         // 429 errors should ALSO return 502 (not 429)
         let error_429 = provider_error(
@@ -460,7 +459,7 @@ mod tests {
             Some("rate limit exceeded".to_string()),
         );
         assert_eq!(error_429.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(error_429.code, "PROVIDER_ERROR");
+        assert_eq!(error_429.code, Box::from("PROVIDER_ERROR"));
 
         // 2xx errors (unlikely but should still map to 502)
         let error_2xx = provider_error(
@@ -469,7 +468,7 @@ mod tests {
             Some("success but invalid format".to_string()),
         );
         assert_eq!(error_2xx.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(error_2xx.code, "PROVIDER_ERROR");
+        assert_eq!(error_2xx.code, Box::from("PROVIDER_ERROR"));
 
         // Verify responses all return 502
         for error in [&error_5xx, &error_4xx, &error_429, &error_2xx] {
@@ -484,7 +483,7 @@ mod tests {
         let api_error: ApiError = db_error.into();
 
         assert_eq!(api_error.status, StatusCode::NOT_FOUND);
-        assert_eq!(api_error.code, "NOT_FOUND");
+        assert_eq!(api_error.code, Box::from("NOT_FOUND"));
         assert!(api_error.message.contains("test_record"));
     }
 
@@ -493,22 +492,28 @@ mod tests {
         // Test unauthorized error
         let auth_error = unauthorized(None);
         assert_eq!(auth_error.status, StatusCode::UNAUTHORIZED);
-        assert_eq!(auth_error.code, "UNAUTHORIZED");
-        assert_eq!(auth_error.message, "Authentication required");
+        assert_eq!(auth_error.code, Box::from("UNAUTHORIZED"));
+        assert_eq!(auth_error.message, Box::from("Authentication required"));
 
         // Test unauthorized error with custom message
         let custom_auth_error = unauthorized(Some("Invalid token"));
-        assert_eq!(custom_auth_error.message, "Invalid token");
+        assert_eq!(custom_auth_error.message, Box::from("Invalid token"));
 
         // Test forbidden error
         let forbidden_error = forbidden(None);
         assert_eq!(forbidden_error.status, StatusCode::FORBIDDEN);
-        assert_eq!(forbidden_error.code, "FORBIDDEN");
-        assert_eq!(forbidden_error.message, "Insufficient permissions");
+        assert_eq!(forbidden_error.code, Box::from("FORBIDDEN"));
+        assert_eq!(
+            forbidden_error.message,
+            Box::from("Insufficient permissions")
+        );
 
         // Test forbidden error with custom message
         let custom_forbidden_error = forbidden(Some("Admin access required"));
-        assert_eq!(custom_forbidden_error.message, "Admin access required");
+        assert_eq!(
+            custom_forbidden_error.message,
+            Box::from("Admin access required")
+        );
     }
 
     #[test]
@@ -521,9 +526,9 @@ mod tests {
         let validation_error = validation_error("Validation failed", field_errors.clone());
 
         assert_eq!(validation_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(validation_error.code, "VALIDATION_FAILED");
-        assert_eq!(validation_error.message, "Validation failed");
-        assert_eq!(validation_error.details, Some(field_errors));
+        assert_eq!(validation_error.code, Box::from("VALIDATION_FAILED"));
+        assert_eq!(validation_error.message, Box::from("Validation failed"));
+        assert_eq!(validation_error.details, Some(Box::new(field_errors)));
     }
 
     #[test]
@@ -531,13 +536,13 @@ mod tests {
         // Scenario: Validation error returns 400 with details (matches spec)
         let validation_err = validation_error("Validation failed", json!({"name": "required"}));
         assert_eq!(validation_err.status, StatusCode::BAD_REQUEST);
-        assert_eq!(validation_err.code, "VALIDATION_FAILED");
+        assert_eq!(validation_err.code, Box::from("VALIDATION_FAILED"));
         assert!(validation_err.trace_id.is_some());
 
         // Scenario: Not found returns 404 (matches spec)
         let not_found_err: ApiError = ErrorType::NotFound.into();
         assert_eq!(not_found_err.status, StatusCode::NOT_FOUND);
-        assert_eq!(not_found_err.code, "NOT_FOUND");
+        assert_eq!(not_found_err.code, Box::from("NOT_FOUND"));
         assert!(not_found_err.trace_id.is_some());
 
         // Scenario: Rate limited returns 429 with Retry-After (matches spec)
@@ -548,14 +553,14 @@ mod tests {
         )
         .with_retry_after(60);
         assert_eq!(rate_limit_err.status, StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(rate_limit_err.code, "RATE_LIMITED");
+        assert_eq!(rate_limit_err.code, Box::from("RATE_LIMITED"));
         assert_eq!(rate_limit_err.retry_after, Some(60));
         assert!(rate_limit_err.trace_id.is_some());
 
         // Scenario: Internal error returns 500 with trace id (matches spec)
         let internal_err: ApiError = anyhow::anyhow!("Something went wrong").into();
         assert_eq!(internal_err.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(internal_err.code, "INTERNAL_SERVER_ERROR");
+        assert_eq!(internal_err.code, Box::from("INTERNAL_SERVER_ERROR"));
         assert!(internal_err.trace_id.is_some());
 
         // Scenario: Provider error maps to 502 (matches spec)
@@ -565,7 +570,7 @@ mod tests {
             Some("Service unavailable".to_string()),
         );
         assert_eq!(provider_err.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(provider_err.code, "PROVIDER_ERROR");
+        assert_eq!(provider_err.code, Box::from("PROVIDER_ERROR"));
         assert!(provider_err.details.is_some());
         assert!(provider_err.trace_id.is_some());
 
@@ -626,9 +631,11 @@ mod tests {
 
             // SPEC REQUIREMENT 2: Return PROVIDER_ERROR code for ALL provider errors
             assert_eq!(
-                error.code, "PROVIDER_ERROR",
+                error.code.as_ref(),
+                "PROVIDER_ERROR",
                 "FAILED: Upstream {} should return PROVIDER_ERROR code, got {}",
-                upstream_status, error.code
+                upstream_status,
+                error.code
             );
             println!("  ✅ Error Code: {}", error.code);
 

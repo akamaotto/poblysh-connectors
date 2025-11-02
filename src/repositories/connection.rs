@@ -223,18 +223,18 @@ impl ConnectionRepository {
             .order_by_asc(connection::Column::CreatedAt)
             .order_by_asc(connection::Column::Id);
 
-        if let Some(cursor) = cursor {
-            if !cursor.is_empty() {
-                let (created_at, cursor_id) = parse_cursor(&cursor)?;
-                let condition = Condition::any()
-                    .add(connection::Column::CreatedAt.gt(created_at))
-                    .add(
-                        Condition::all()
-                            .add(connection::Column::CreatedAt.eq(created_at))
-                            .add(connection::Column::Id.gt(cursor_id)),
-                    );
-                query = query.filter(condition);
-            }
+        if let Some(cursor) = cursor
+            && !cursor.is_empty()
+        {
+            let (created_at, cursor_id) = parse_cursor(&cursor)?;
+            let condition = Condition::any()
+                .add(connection::Column::CreatedAt.gt(created_at))
+                .add(
+                    Condition::all()
+                        .add(connection::Column::CreatedAt.eq(created_at))
+                        .add(connection::Column::Id.gt(cursor_id)),
+                );
+            query = query.filter(condition);
         }
 
         let mut rows = query.limit(limit + 1).all(&*self.db).await?;
@@ -258,7 +258,7 @@ fn parse_cursor(cursor: &str) -> Result<(DateTimeWithTimeZone, Uuid)> {
     let timestamp = DateTime::parse_from_rfc3339(timestamp_str)?;
     let id = Uuid::parse_str(id_str)?;
 
-    Ok((timestamp.into(), id))
+    Ok((timestamp, id))
 }
 
 fn build_cursor(created_at: &DateTimeWithTimeZone, id: Uuid) -> Result<String> {

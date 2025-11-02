@@ -256,3 +256,9 @@ impl ConfigLoader {
         }
     }
 }
+
+impl Default for ConfigLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}

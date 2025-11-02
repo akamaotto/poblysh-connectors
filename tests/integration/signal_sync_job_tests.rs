@@ -5,10 +5,12 @@
 //! - Index creation and ordering
 //! - Basic query patterns
 
-use crate::test_utils::{create_test_tenant, setup_test_db};
+#[path = "../test_utils/mod.rs"]
+mod test_utils;
 use anyhow::Result;
 use connectors::seeds::seed_providers;
 use sea_orm::{ConnectionTrait, Statement};
+use test_utils::{create_test_tenant, setup_test_db};
 
 #[tokio::test]
 async fn signals_table_created_with_correct_schema() -> Result<()> {

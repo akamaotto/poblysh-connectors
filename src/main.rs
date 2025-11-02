@@ -3,7 +3,7 @@
 //! This is the main entry point for the Connectors API service.
 
 use clap::{Parser, Subcommand};
-use connectors::{config::ConfigLoader, db, server::run_server};
+use connectors::{config::ConfigLoader, connectors::Registry, db, server::run_server};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::DatabaseConnection;
 
@@ -64,6 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Migrator::up(&db, None).await?;
         println!("Migrations completed successfully");
     }
+
+    // Initialize the connector registry
+    Registry::initialize();
+    println!("Connector registry initialized with example provider");
 
     // Log the loaded configuration (no secrets in current schema)
     println!("Loaded configuration for profile: {}", config.profile);

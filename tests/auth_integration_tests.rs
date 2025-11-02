@@ -50,16 +50,12 @@ async fn test_public_endpoints_no_auth_required() {
     let client = reqwest::Client::new();
 
     // Test root endpoint (public)
-    let response = client
-        .get(&format!("{}/", server_url))
-        .send()
-        .await
-        .unwrap();
+    let response = client.get(format!("{}/", server_url)).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     // Test health endpoint (public)
     let response = client
-        .get(&format!("{}/healthz", server_url))
+        .get(format!("{}/healthz", server_url))
         .send()
         .await
         .unwrap();
@@ -67,7 +63,7 @@ async fn test_public_endpoints_no_auth_required() {
 
     // Test ready endpoint (public)
     let response = client
-        .get(&format!("{}/readyz", server_url))
+        .get(format!("{}/readyz", server_url))
         .send()
         .await
         .unwrap();
@@ -75,7 +71,7 @@ async fn test_public_endpoints_no_auth_required() {
 
     // Test docs endpoint (public)
     let response = client
-        .get(&format!("{}/docs", server_url))
+        .get(format!("{}/docs", server_url))
         .send()
         .await
         .unwrap();
@@ -83,7 +79,7 @@ async fn test_public_endpoints_no_auth_required() {
 
     // Test openapi.json endpoint (public)
     let response = client
-        .get(&format!("{}/openapi.json", server_url))
+        .get(format!("{}/openapi.json", server_url))
         .send()
         .await
         .unwrap();
@@ -104,7 +100,7 @@ async fn test_missing_authorization_header() {
     // Note: We don't have protected endpoints yet, so this test will be updated
     // when we add actual protected endpoints
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("X-Tenant-Id", Uuid::new_v4().to_string())
         .send()
         .await;
@@ -136,7 +132,7 @@ async fn test_invalid_authorization_format() {
 
     // Test with Basic auth instead of Bearer
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Basic dGVzdDoxMjM=")
         .header("X-Tenant-Id", Uuid::new_v4().to_string())
         .send()
@@ -166,7 +162,7 @@ async fn test_invalid_bearer_token() {
 
     // Test with wrong token
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Bearer wrong-token")
         .header("X-Tenant-Id", Uuid::new_v4().to_string())
         .send()
@@ -196,7 +192,7 @@ async fn test_missing_tenant_header() {
 
     // Test with valid auth but missing tenant header
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Bearer test-token")
         .send()
         .await;
@@ -225,7 +221,7 @@ async fn test_invalid_tenant_uuid() {
 
     // Test with valid auth but invalid tenant UUID
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Bearer test-token")
         .header("X-Tenant-Id", "not-a-uuid")
         .send()
@@ -256,7 +252,7 @@ async fn test_valid_auth_and_tenant() {
 
     // Test with valid auth and tenant
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Bearer test-token")
         .header("X-Tenant-Id", tenant_id.to_string())
         .send()
@@ -292,7 +288,7 @@ async fn test_multiple_tokens() {
     // Test with each token
     for token in &["token-one", "token-two", "token-three"] {
         let response = client
-            .get(&format!("{}/protected", server_url))
+            .get(format!("{}/protected", server_url))
             .header("Authorization", format!("Bearer {}", token))
             .header("X-Tenant-Id", tenant_id.to_string())
             .send()
@@ -323,7 +319,7 @@ async fn test_openapi_security_scheme() {
 
     // Test that OpenAPI doc includes security scheme
     let response = client
-        .get(&format!("{}/openapi.json", server_url))
+        .get(format!("{}/openapi.json", server_url))
         .send()
         .await
         .unwrap();
@@ -364,45 +360,45 @@ async fn test_error_response_format() {
 
     // Test missing auth header error format
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("X-Tenant-Id", Uuid::new_v4().to_string())
         .send()
         .await;
 
-    if let Ok(resp) = response {
-        if resp.status() == StatusCode::UNAUTHORIZED {
-            // Check error response format
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "application/problem+json"
-            );
+    if let Ok(resp) = response
+        && resp.status() == StatusCode::UNAUTHORIZED
+    {
+        // Check error response format
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/problem+json"
+        );
 
-            let error: Value = resp.json().await.unwrap();
-            assert_eq!(error.get("code").unwrap(), "UNAUTHORIZED");
-            assert!(error.get("message").is_some());
-            assert!(error.get("trace_id").is_some());
-        }
+        let error: Value = resp.json().await.unwrap();
+        assert_eq!(error.get("code").unwrap(), "UNAUTHORIZED");
+        assert!(error.get("message").is_some());
+        assert!(error.get("trace_id").is_some());
     }
 
     // Test missing tenant header error format
     let response = client
-        .get(&format!("{}/protected", server_url))
+        .get(format!("{}/protected", server_url))
         .header("Authorization", "Bearer test-token")
         .send()
         .await;
 
-    if let Ok(resp) = response {
-        if resp.status() == StatusCode::BAD_REQUEST {
-            // Check error response format
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "application/problem+json"
-            );
+    if let Ok(resp) = response
+        && resp.status() == StatusCode::BAD_REQUEST
+    {
+        // Check error response format
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/problem+json"
+        );
 
-            let error: Value = resp.json().await.unwrap();
-            assert_eq!(error.get("code").unwrap(), "VALIDATION_FAILED");
-            assert!(error.get("message").is_some());
-            assert!(error.get("trace_id").is_some());
-        }
+        let error: Value = resp.json().await.unwrap();
+        assert_eq!(error.get("code").unwrap(), "VALIDATION_FAILED");
+        assert!(error.get("message").is_some());
+        assert!(error.get("trace_id").is_some());
     }
 }

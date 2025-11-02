@@ -85,10 +85,10 @@ pub async fn init_pool(cfg: &AppConfig) -> Result<DatabaseConnection> {
                     database_ready = true;
                 }
                 Err(err) => {
-                    if let Some(db_error) = err.downcast_ref::<DatabaseError>() {
-                        if matches!(db_error, DatabaseError::InvalidConfiguration { .. }) {
-                            return Err(err);
-                        }
+                    if let Some(db_error) = err.downcast_ref::<DatabaseError>()
+                        && matches!(db_error, DatabaseError::InvalidConfiguration { .. })
+                    {
+                        return Err(err);
                     }
 
                     if attempt == max_retries {
@@ -259,8 +259,10 @@ mod tests {
 
     #[test]
     fn test_invalid_database_url() {
-        let mut config = AppConfig::default();
-        config.database_url = "".to_string();
+        let config = AppConfig {
+            database_url: "".to_string(),
+            ..Default::default()
+        };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(init_pool(&config));
