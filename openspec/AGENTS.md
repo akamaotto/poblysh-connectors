@@ -254,6 +254,7 @@ Every requirement MUST have at least one scenario.
 
 ### Requirement Wording
 - Use SHALL/MUST for normative requirements (avoid should/may unless intentionally non-normative)
+- Error code identifiers (e.g., API problem `code` values) MUST use screaming snake case such as `VALIDATION_FAILED` and `INTERNAL_SERVER_ERROR`
 
 ### Delta Operations
 

@@ -2,6 +2,9 @@
 //!
 //! This module contains unit tests for API handlers.
 
+use std::sync::Arc;
+
+use crate::config::AppConfig;
 use crate::handlers::root;
 use crate::models::ServiceInfo;
 use crate::server::AppState;
@@ -13,13 +16,18 @@ use serde_json::Value;
 async fn test_root_handler_returns_success() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
-    let state = AppState { db };
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        db,
+    };
     let state = State(state);
 
     // Call root handler
-    let response = root(state).await;
+    let result = root(state).await;
 
-    // Verify response is a Json type
+    // Verify response is Ok(Json(_))
+    assert!(result.is_ok());
+    let response = result.unwrap();
     assert!(matches!(response, Json(_)));
 }
 
@@ -27,11 +35,15 @@ async fn test_root_handler_returns_success() {
 async fn test_root_handler_returns_expected_service_info() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
-    let state = AppState { db };
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        db,
+    };
     let state = State(state);
 
     // Call root handler
-    let response = root(state).await;
+    let result = root(state).await;
+    let response = result.unwrap();
 
     // Extract ServiceInfo from Json response
     let Json(service_info) = response;
@@ -47,11 +59,15 @@ async fn test_root_handler_returns_expected_service_info() {
 async fn test_root_handler_returns_valid_json() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
-    let state = AppState { db };
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        db,
+    };
     let state = State(state);
 
     // Call root handler
-    let response = root(state).await;
+    let result = root(state).await;
+    let response = result.unwrap();
 
     // Extract ServiceInfo from Json response
     let Json(service_info) = response;

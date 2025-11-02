@@ -4,3 +4,4 @@
 //! like databases via testcontainers.
 
 pub mod db_tests;
+pub mod signal_sync_job_tests;

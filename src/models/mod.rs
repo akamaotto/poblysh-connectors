@@ -7,9 +7,13 @@ use utoipa::ToSchema;
 
 pub mod connection;
 pub mod provider;
+pub mod signal;
+pub mod sync_job;
 
 pub use connection::Entity as Connection;
 pub use provider::Entity as Provider;
+pub use signal::Entity as Signal;
+pub use sync_job::Entity as SyncJob;
 
 /// Basic service information response
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

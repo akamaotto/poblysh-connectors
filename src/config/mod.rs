@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub db_max_connections: u32,
     #[serde(default = "default_db_acquire_timeout_ms")]
     pub db_acquire_timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operator_tokens: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -35,6 +37,7 @@ impl Default for AppConfig {
             database_url: default_database_url(),
             db_max_connections: default_db_max_connections(),
             db_acquire_timeout_ms: default_db_acquire_timeout_ms(),
+            operator_tokens: Vec::new(),
         }
     }
 }
@@ -45,9 +48,29 @@ impl AppConfig {
         self.api_bind_addr.parse()
     }
 
-    /// Returns a redacted JSON representation (no secrets in current schema).
+    /// Returns a redacted JSON representation (secrets are redacted).
     pub fn redacted_json(&self) -> serde_json::Result<String> {
-        serde_json::to_string_pretty(self)
+        let mut config = self.clone();
+        // Redact operator tokens for security
+        if !config.operator_tokens.is_empty() {
+            config.operator_tokens = vec!["[REDACTED]".to_string()];
+        }
+        serde_json::to_string_pretty(&config)
+    }
+
+    /// Validates the configuration, returning an error if required settings are missing.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // For local and test profiles, require at least one operator token
+        if (self.profile == "local" || self.profile == "test") && self.operator_tokens.is_empty() {
+            return Err(ConfigError::MissingOperatorTokens);
+        }
+
+        // For production profiles, also require at least one operator token
+        if !matches!(self.profile.as_str(), "local" | "test") && self.operator_tokens.is_empty() {
+            return Err(ConfigError::MissingOperatorTokens);
+        }
+
+        Ok(())
     }
 }
 
@@ -88,6 +111,8 @@ pub enum ConfigError {
         value: String,
         source: std::net::AddrParseError,
     },
+    #[error("no operator tokens configured; set POBLYSH_OPERATOR_TOKEN or POBLYSH_OPERATOR_TOKENS")]
+    MissingOperatorTokens,
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -144,6 +169,21 @@ impl ConfigLoader {
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_db_acquire_timeout_ms);
 
+        // Handle operator tokens - support both single token and comma-separated list
+        let operator_tokens = if let Some(tokens) = layered.remove("OPERATOR_TOKENS") {
+            // POBLYSH_OPERATOR_TOKENS (comma-separated)
+            tokens
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else if let Some(token) = layered.remove("OPERATOR_TOKEN") {
+            // POBLYSH_OPERATOR_TOKEN (single)
+            vec![token]
+        } else {
+            Vec::new()
+        };
+
         let config = AppConfig {
             profile,
             api_bind_addr,
@@ -151,7 +191,11 @@ impl ConfigLoader {
             database_url,
             db_max_connections,
             db_acquire_timeout_ms,
+            operator_tokens,
         };
+
+        // Validate configuration
+        config.validate()?;
 
         match config.bind_addr() {
             Ok(_) => Ok(config),

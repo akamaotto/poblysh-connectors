@@ -3,6 +3,7 @@
 //! This module contains all test modules for the Connectors API,
 //! including integration tests, unit tests, and utility functions.
 
+pub mod auth_integration_tests;
 pub mod provider_connection_integration_tests;
 pub mod provider_repository_tests;
 pub mod provider_seeding_tests;

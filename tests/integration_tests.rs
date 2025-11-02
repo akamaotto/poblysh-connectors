@@ -22,7 +22,10 @@ async fn start_test_server() -> String {
 
     // Create a mock AppState for testing
     let db = DatabaseConnection::default();
-    let state = AppState { db };
+    let state = AppState {
+        config: std::sync::Arc::new(connectors::config::AppConfig::default()),
+        db,
+    };
 
     let app = create_app(state);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

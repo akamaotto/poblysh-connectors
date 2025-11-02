@@ -7,6 +7,8 @@ pub use sea_orm_migration::prelude::*;
 mod m2024_01_01_000001_create_tenants;
 mod m2025_11_01_102700_create_providers;
 mod m2025_11_01_102800_create_connections;
+mod m2025_11_01_103000_create_signals;
+mod m2025_11_01_103100_create_sync_jobs;
 
 pub struct Migrator;
 
@@ -17,6 +19,8 @@ impl MigratorTrait for Migrator {
             Box::new(m2024_01_01_000001_create_tenants::Migration),
             Box::new(m2025_11_01_102700_create_providers::Migration),
             Box::new(m2025_11_01_102800_create_connections::Migration),
+            Box::new(m2025_11_01_103000_create_signals::Migration),
+            Box::new(m2025_11_01_103100_create_sync_jobs::Migration),
         ]
     }
 }

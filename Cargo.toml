@@ -28,10 +28,16 @@ clap = { version = "4.5.26", features = ["derive"] }
 migration = { path = "migration" }
 anyhow = "1.0.95"
 log = "0.4.22"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 url = "2.5.4"
+subtle = "2.6.1"
+tower = "0.5.1"
+td-rs = "0.1.5"
 
 [dev-dependencies]
 reqwest = { version = "0.12.9", features = ["json"] }
 tempfile = "3.14.0"
-testcontainers = "0.25"
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
 anyhow = "1.0.95"
