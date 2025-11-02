@@ -2,6 +2,8 @@
 //!
 //! This module contains all the HTTP endpoint handlers for the Connectors API.
 
+pub mod providers;
+
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};
 use crate::error::ApiError;
 use crate::models::ServiceInfo;

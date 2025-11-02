@@ -28,6 +28,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/", get(handlers::root))
         .route("/healthz", get(handlers::health))
         .route("/readyz", get(handlers::ready))
+        .route("/providers", get(handlers::providers::list_providers))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()));
 
     // Protected routes (auth required)
@@ -79,6 +80,7 @@ pub async fn run_server(
         crate::handlers::health,
         crate::handlers::ready,
         crate::handlers::protected_ping,
+        crate::handlers::providers::list_providers,
     ),
     components(
         schemas(
@@ -86,6 +88,8 @@ pub async fn run_server(
             ApiError,
             crate::auth::TenantHeader,
             crate::handlers::ProtectedPingResponse,
+            crate::handlers::providers::ProviderInfo,
+            crate::handlers::providers::ProvidersResponse,
         ),
     ),
     modifiers(&SecurityAddon),
@@ -101,6 +105,7 @@ pub async fn run_server(
         (name = "root", description = "Root endpoint"),
         (name = "health", description = "Health check endpoints"),
         (name = "operators", description = "Operator-scoped endpoints"),
+        (name = "providers", description = "Provider listing endpoints"),
     ),
     security(
         ("bearer_auth" = []),

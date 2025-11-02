@@ -7,6 +7,7 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 3) add-seaorm-setup-and-migrations — DB connection, Migrator, baseline schema.
 4) add-provider-and-connection-entities — SeaORM entities + repo layer.
 5) add-signal-and-syncjob-entities — SeaORM entities + indices.
+
 6) add-error-model-and-problem-json — Unified API errors and mappers.
 7) add-operator-bearer-auth-and-tenant-header — `Authorization` + `X-Tenant-Id` guard.
 8) add-providers-endpoint — `GET /providers` returns registry metadata.
@@ -19,6 +20,7 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 13) add-local-token-encryption — AES-GCM with `POBLYSH_CRYPTO_KEY`.
 14) add-health-and-readiness-endpoints — `GET /healthz`, `GET /readyz`.
 15) add-logging-and-tracing-basics — `tracing` JSON logs with spans.
+
 16) add-webhook-ingest-endpoint — `POST /webhooks/{provider}` base handler.
 17) add-webhook-signature-verification — GitHub HMAC, Slack v2, etc.
 18) add-sync-engine-scheduler — Interval triggers with jitter.
