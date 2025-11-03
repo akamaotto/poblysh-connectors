@@ -8,12 +8,15 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::DateTimeWithTimeZone;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, Set,
 };
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::crypto::{
+    CryptoKey, decrypt_connection_tokens, encrypt_connection_tokens, is_encrypted_payload,
+};
 use crate::models::connection::{self, Entity as Connection};
 
 /// Repository for connection database operations
@@ -21,12 +24,137 @@ use crate::models::connection::{self, Entity as Connection};
 pub struct ConnectionRepository {
     /// Database connection pool
     pub db: Arc<DatabaseConnection>,
+    /// Crypto key for token encryption
+    pub crypto_key: CryptoKey,
 }
 
 impl ConnectionRepository {
     /// Creates a new ConnectionRepository instance
-    pub fn new(db: Arc<DatabaseConnection>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<DatabaseConnection>, crypto_key: CryptoKey) -> Self {
+        Self { db, crypto_key }
+    }
+
+    /// Encrypts tokens and updates connection with encrypted ciphertexts
+    pub async fn encrypt_and_update_tokens(
+        &self,
+        connection_id: &Uuid,
+        access_token: Option<&str>,
+        refresh_token: Option<&str>,
+    ) -> Result<connection::Model> {
+        let connection = self
+            .get_by_id(connection_id)
+            .await?
+            .ok_or_else(|| anyhow!("Connection with ID '{}' not found", connection_id))?;
+
+        let (encrypted_access_token, encrypted_refresh_token) =
+            encrypt_connection_tokens(&self.crypto_key, &connection, access_token, refresh_token)
+                .map_err(|e| anyhow!("Token encryption failed: {}", e))?;
+
+        self.update_tokens_status(
+            connection_id,
+            encrypted_access_token,
+            encrypted_refresh_token,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Decrypts tokens from a connection model
+    pub async fn decrypt_tokens(
+        &self,
+        connection: &connection::Model,
+    ) -> Result<(Option<String>, Option<String>, bool)> {
+        let has_legacy_access = connection
+            .access_token_ciphertext
+            .as_ref()
+            .is_some_and(|token| !is_encrypted_payload(token));
+        let has_legacy_refresh = connection
+            .refresh_token_ciphertext
+            .as_ref()
+            .is_some_and(|token| !is_encrypted_payload(token));
+        let had_legacy_tokens = has_legacy_access || has_legacy_refresh;
+
+        if had_legacy_tokens {
+            tracing::warn!(
+                tenant_id = %connection.tenant_id,
+                provider_slug = %connection.provider_slug,
+                external_id = %connection.external_id,
+                legacy_access_token = has_legacy_access,
+                legacy_refresh_token = has_legacy_refresh,
+                "Legacy plaintext tokens detected, consider migrating to encrypted format"
+            );
+        }
+
+        let (decrypted_access_token, decrypted_refresh_token) =
+            decrypt_connection_tokens(&self.crypto_key, connection).map_err(|e| {
+                // Log decryption failures as generic auth errors without details
+                tracing::error!(
+                    tenant_id = %connection.tenant_id,
+                    provider_slug = %connection.provider_slug,
+                    external_id = %connection.external_id,
+                    "Token decryption failed"
+                );
+                anyhow!("Token decryption failed: {}", e)
+            })?;
+
+        Ok((
+            decrypted_access_token,
+            decrypted_refresh_token,
+            had_legacy_tokens,
+        ))
+    }
+
+    /// Creates a connection with encrypted tokens
+    pub async fn create_with_tokens(
+        &self,
+        mut connection: connection::ActiveModel,
+        access_token: Option<&str>,
+        refresh_token: Option<&str>,
+    ) -> Result<connection::Model> {
+        let connection_id = connection
+            .id
+            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("connection id must be set"))?;
+
+        // Create a temporary connection model for AAD generation
+        let temp_connection = connection::Model {
+            id: connection_id,
+            tenant_id: connection.tenant_id.clone().unwrap(),
+            provider_slug: connection.provider_slug.clone().unwrap(),
+            external_id: connection.external_id.clone().unwrap(),
+            status: connection.status.clone().unwrap(),
+            display_name: None, // Not needed for AAD generation
+            access_token_ciphertext: None,
+            refresh_token_ciphertext: None,
+            expires_at: None, // Not needed for AAD generation
+            scopes: None,     // Not needed for AAD generation
+            metadata: None,   // Not needed for AAD generation
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+        };
+
+        // Encrypt tokens
+        let (encrypted_access_token, encrypted_refresh_token) = encrypt_connection_tokens(
+            &self.crypto_key,
+            &temp_connection,
+            access_token,
+            refresh_token,
+        )
+        .map_err(|e| anyhow!("Token encryption failed: {}", e))?;
+
+        // Set encrypted ciphertexts
+        connection.access_token_ciphertext = Set(encrypted_access_token);
+        connection.refresh_token_ciphertext = Set(encrypted_refresh_token);
+
+        // Save connection
+        let active = connection;
+        active.insert(&*self.db).await?;
+
+        // For SQLite, query the record directly since we already know the ID
+        let fetched = Connection::find_by_id(connection_id).one(&*self.db).await?;
+        fetched.ok_or_else(|| anyhow!("connection not persisted"))
     }
 
     /// Finds a connection by its ID within a tenant scope
@@ -106,13 +234,11 @@ impl ConnectionRepository {
             .ok_or_else(|| anyhow!("connection id must be set"))?;
 
         let active = connection;
-        match active.save(&*self.db).await {
-            Ok(_) | Err(DbErr::RecordNotFound(_)) => {
-                let fetched = Connection::find_by_id(id).one(&*self.db).await?;
-                fetched.ok_or_else(|| anyhow!("connection not persisted"))
-            }
-            Err(err) => Err(err.into()),
-        }
+        active.insert(&*self.db).await?;
+
+        // For SQLite, query the record directly since we already know the ID
+        let fetched = Connection::find_by_id(id).one(&*self.db).await?;
+        fetched.ok_or_else(|| anyhow!("connection not persisted"))
     }
 
     /// Updates mutable fields on a connection within a tenant scope
