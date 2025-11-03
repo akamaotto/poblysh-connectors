@@ -22,6 +22,7 @@ fn clear_env() {
         env::remove_var("POBLYSH_PROFILE");
         env::remove_var("POBLYSH_API_BIND_ADDR");
         env::remove_var("POBLYSH_LOG_LEVEL");
+        env::remove_var("POBLYSH_CRYPTO_KEY");
     }
 }
 
@@ -34,6 +35,14 @@ fn write_env_file(dir: &TempDir, name: &str, contents: &str) {
 fn loads_defaults_when_no_env_present() {
     let _guard = env_guard();
     clear_env();
+
+    // Set a valid crypto key for the test
+    unsafe {
+        env::set_var(
+            "POBLYSH_CRYPTO_KEY",
+            "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+        );
+    }
 
     let loader = ConfigLoader::new();
     let cfg = loader.load().expect("config loads with defaults");
@@ -68,7 +77,7 @@ fn layered_env_files_apply_in_order() {
     write_env_file(
         &temp_dir,
         ".env.local",
-        "POBLYSH_PROFILE=test\nPOBLYSH_API_BIND_ADDR=127.0.0.1:4000\nPOBLYSH_OPERATOR_TOKEN=test-token-for-layered-test\n",
+        "POBLYSH_PROFILE=test\nPOBLYSH_API_BIND_ADDR=127.0.0.1:4000\nPOBLYSH_OPERATOR_TOKEN=test-token-for-layered-test\nPOBLYSH_CRYPTO_KEY=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=\n",
     );
 
     let loader = ConfigLoader::with_base_dir(PathBuf::from(temp_dir.path()));
@@ -93,6 +102,10 @@ fn os_environment_has_highest_precedence() {
 
     unsafe {
         env::set_var("POBLYSH_API_BIND_ADDR", "0.0.0.0:9090");
+        env::set_var(
+            "POBLYSH_CRYPTO_KEY",
+            "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+        );
     }
 
     let loader = ConfigLoader::with_base_dir(PathBuf::from(temp_dir.path()));
@@ -109,6 +122,10 @@ fn invalid_bind_addr_returns_error() {
 
     unsafe {
         env::set_var("POBLYSH_API_BIND_ADDR", "not-an-addr");
+        env::set_var(
+            "POBLYSH_CRYPTO_KEY",
+            "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+        );
     }
     let loader = ConfigLoader::new();
     let err = loader.load().expect_err("invalid bind addr should fail");

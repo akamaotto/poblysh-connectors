@@ -70,8 +70,7 @@ pub async fn init_pool(cfg: &AppConfig) -> Result<DatabaseConnection> {
         .acquire_timeout(Duration::from_millis(cfg.db_acquire_timeout_ms))
         .idle_timeout(Duration::from_secs(600)) // 10 minutes
         .max_lifetime(Duration::from_secs(1800)) // 30 minutes
-        .sqlx_logging(true)
-        .sqlx_logging_level(log::LevelFilter::Debug);
+        .sqlx_logging(false); // Disabled to avoid conflict with tracing subscriber
 
     // Implement retry logic with exponential backoff
     let max_retries = 5;

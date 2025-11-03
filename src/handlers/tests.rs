@@ -16,9 +16,12 @@ use serde_json::Value;
 async fn test_root_handler_returns_success() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
+    let crypto_key =
+        crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         db,
+        crypto_key,
     };
     let state = State(state);
 
@@ -35,9 +38,12 @@ async fn test_root_handler_returns_success() {
 async fn test_root_handler_returns_expected_service_info() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
+    let crypto_key =
+        crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         db,
+        crypto_key,
     };
     let state = State(state);
 
@@ -59,9 +65,12 @@ async fn test_root_handler_returns_expected_service_info() {
 async fn test_root_handler_returns_valid_json() {
     // Create a mock state for testing
     let db = DatabaseConnection::default();
+    let crypto_key =
+        crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         db,
+        crypto_key,
     };
     let state = State(state);
 

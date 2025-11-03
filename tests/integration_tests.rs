@@ -22,9 +22,12 @@ async fn start_test_server() -> String {
 
     // Create a mock AppState for testing
     let db = DatabaseConnection::default();
+    let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+        .expect("Failed to create test crypto key");
     let state = AppState {
         config: std::sync::Arc::new(connectors::config::AppConfig::default()),
         db,
+        crypto_key,
     };
 
     let app = create_app(state);

@@ -22,7 +22,11 @@ sea-orm = { version = "1.1.17", default-features = false, features = [
     "with-uuid",
     "with-json",
 ] }
-sea-orm-migration = { version = "1.1.1", features = ["runtime-tokio-rustls"] }
+sea-orm-migration = { version = "1.1.1", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+] }
 uuid = { version = "1.11.0", features = ["v4"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.5.26", features = ["derive"] }
@@ -30,15 +34,26 @@ migration = { path = "migration" }
 anyhow = "1.0.95"
 log = "0.4.22"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+tracing-log = "0.2.0"
+tower-http = { version = "0.6.2", features = ["trace"] }
 url = { version = "2.5.4", features = ["serde"] }
 subtle = "2.6.1"
 tower = "0.5.1"
 td-rs = "0.1.5"
+rand = "0.8.5"
+base64 = "0.22.1"
+aes-gcm = "0.10.3"
+zeroize = { version = "1.8.1", features = ["zeroize_derive"] }
+base64-url = "3.0.0"
+regex = "1.11.1"
 
 [dev-dependencies]
 reqwest = { version = "0.12.9", features = ["json"] }
 tempfile = "3.14.0"
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres"] }
+testcontainers = "0.25.2"
+testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 anyhow = "1.0.95"
+
+[patch.crates-io]
+sqlx-mysql = { path = "patches/sqlx-mysql" }

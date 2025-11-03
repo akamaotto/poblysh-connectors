@@ -1,23 +1,64 @@
 //! Integration tests for authentication and tenant validation
 
+use anyhow::{Context, Result as AnyhowResult};
 use connectors::{config::AppConfig, server::create_app};
 use reqwest::StatusCode;
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
 
+#[path = "test_utils/mod.rs"]
+mod test_utils;
+
+struct TestServerHandle {
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    join_handle: Option<JoinHandle<AnyhowResult<()>>>,
+}
+
+impl TestServerHandle {
+    fn new(shutdown_tx: oneshot::Sender<()>, join_handle: JoinHandle<AnyhowResult<()>>) -> Self {
+        Self {
+            shutdown_tx: Some(shutdown_tx),
+            join_handle: Some(join_handle),
+        }
+    }
+
+    async fn shutdown(mut self) -> AnyhowResult<()> {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+
+        if let Some(handle) = self.join_handle.take() {
+            let result = handle.await.context("server task join failed")?;
+            result?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for TestServerHandle {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
 /// Test helper to spawn a test server
-async fn spawn_test_app(config: AppConfig) -> (String, DatabaseConnection) {
-    // Create a test database
-    let db_url = "sqlite::memory:".to_string();
-    let db = Database::connect(&db_url).await.unwrap();
+async fn spawn_test_app(config: AppConfig) -> (String, Arc<DatabaseConnection>, TestServerHandle) {
+    // Create a test database with migrations
+    let db = Arc::new(test_utils::setup_test_db().await.unwrap());
 
     // Create app state
+    let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+        .expect("Failed to create test crypto key");
     let state = connectors::server::AppState {
         config: Arc::new(config.clone()),
-        db: db.clone(),
+        db: db.as_ref().clone(),
+        crypto_key,
     };
 
     // Create app
@@ -25,18 +66,31 @@ async fn spawn_test_app(config: AppConfig) -> (String, DatabaseConnection) {
 
     // Bind to a random port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let server_url = format!("http://127.0.0.1:{}", port);
+    let addr = listener.local_addr().unwrap();
+    let server_url = format!("http://{}", addr);
+
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     // Spawn server in background
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+    let server_task = tokio::spawn(async move {
+        let server = axum::serve(listener, app).with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        });
+
+        let _ = ready_tx.send(());
+
+        server.await.context("axum server error")
     });
 
-    // Give server a moment to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Wait for server readiness signal
+    ready_rx.await.expect("server task to signal readiness");
 
-    (server_url, db)
+    (
+        server_url,
+        Arc::clone(&db),
+        TestServerHandle::new(shutdown_tx, server_task),
+    )
 }
 
 #[tokio::test]
@@ -46,7 +100,7 @@ async fn test_public_endpoints_no_auth_required() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test root endpoint (public)
@@ -84,6 +138,8 @@ async fn test_public_endpoints_no_auth_required() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -93,7 +149,7 @@ async fn test_missing_authorization_header() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Try to access a protected endpoint without auth header
@@ -118,6 +174,8 @@ async fn test_missing_authorization_header() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -127,7 +185,7 @@ async fn test_invalid_authorization_format() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test with Basic auth instead of Bearer
@@ -148,6 +206,8 @@ async fn test_invalid_authorization_format() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -157,7 +217,7 @@ async fn test_invalid_bearer_token() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test with wrong token
@@ -178,6 +238,8 @@ async fn test_invalid_bearer_token() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -187,7 +249,7 @@ async fn test_missing_tenant_header() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test with valid auth but missing tenant header
@@ -207,6 +269,8 @@ async fn test_missing_tenant_header() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -216,7 +280,7 @@ async fn test_invalid_tenant_uuid() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test with valid auth but invalid tenant UUID
@@ -237,6 +301,8 @@ async fn test_invalid_tenant_uuid() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -246,7 +312,7 @@ async fn test_valid_auth_and_tenant() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
     let tenant_id = Uuid::new_v4();
 
@@ -268,6 +334,8 @@ async fn test_valid_auth_and_tenant() {
             // Connection error is also acceptable for now
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -281,7 +349,7 @@ async fn test_multiple_tokens() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
     let tenant_id = Uuid::new_v4();
 
@@ -305,6 +373,8 @@ async fn test_multiple_tokens() {
             }
         }
     }
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -314,7 +384,7 @@ async fn test_openapi_security_scheme() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test that OpenAPI doc includes security scheme
@@ -346,6 +416,8 @@ async fn test_openapi_security_scheme() {
     let bearer_auth = security_schemes.get("bearer_auth").unwrap();
     assert_eq!(bearer_auth.get("type").unwrap(), "http");
     assert_eq!(bearer_auth.get("scheme").unwrap(), "bearer");
+
+    handle.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -355,7 +427,7 @@ async fn test_error_response_format() {
         ..Default::default()
     };
 
-    let (server_url, _db) = spawn_test_app(config).await;
+    let (server_url, _db, handle) = spawn_test_app(config).await;
     let client = reqwest::Client::new();
 
     // Test missing auth header error format
@@ -401,4 +473,6 @@ async fn test_error_response_format() {
         assert!(error.get("message").is_some());
         assert!(error.get("trace_id").is_some());
     }
+
+    handle.shutdown().await.unwrap();
 }

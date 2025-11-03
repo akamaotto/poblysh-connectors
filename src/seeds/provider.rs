@@ -40,6 +40,11 @@ pub async fn seed_providers(db: &DatabaseConnection) -> Result<()> {
             auth_type: "oauth2".to_string(),
         },
         ProviderConfig {
+            slug: "jira".to_string(),
+            display_name: "Jira".to_string(),
+            auth_type: "oauth2".to_string(),
+        },
+        ProviderConfig {
             slug: "microsoft".to_string(),
             display_name: "Microsoft".to_string(),
             auth_type: "oauth2".to_string(),

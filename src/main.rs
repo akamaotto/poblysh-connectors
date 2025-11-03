@@ -3,7 +3,7 @@
 //! This is the main entry point for the Connectors API service.
 
 use clap::{Parser, Subcommand};
-use connectors::{config::ConfigLoader, connectors::Registry, db, server::run_server};
+use connectors::{config::ConfigLoader, connectors::Registry, db, server::run_server, telemetry};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::DatabaseConnection;
 
@@ -41,6 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration from layered env files and variables
     let config_loader = ConfigLoader::new();
     let config = config_loader.load()?;
+
+    // Initialize tracing subscriber based on configuration
+    telemetry::init_tracing(&config)?;
 
     // Initialize database connection
     let db = db::init_pool(&config).await?;

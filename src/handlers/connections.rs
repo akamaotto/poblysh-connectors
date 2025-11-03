@@ -38,6 +38,15 @@ pub struct ConnectionInfo {
     pub expires_at: Option<String>,
     /// Provider-specific metadata
     pub metadata: serde_json::Value,
+    /// Indicates whether an encrypted access token is stored
+    #[schema(default = false, example = true)]
+    pub has_access_token: bool,
+    /// Indicates whether an encrypted refresh token is stored
+    #[schema(default = false, example = true)]
+    pub has_refresh_token: bool,
+    /// Version of encryption format used for stored tokens
+    #[schema(default = 1, example = 1)]
+    pub token_encryption_version: u8,
 }
 
 impl From<crate::models::connection::Model> for ConnectionInfo {
@@ -51,6 +60,11 @@ impl From<crate::models::connection::Model> for ConnectionInfo {
                 utc_dt.to_rfc3339()
             }),
             metadata: model.metadata.unwrap_or_default(),
+            // Check if encrypted tokens exist
+            has_access_token: model.access_token_ciphertext.is_some(),
+            has_refresh_token: model.refresh_token_ciphertext.is_some(),
+            // Default to version 1 for current encrypted format
+            token_encryption_version: 1,
         }
     }
 }
@@ -81,7 +95,8 @@ pub async fn list_connections(
     TenantExtension(tenant): TenantExtension,
     Query(query): Query<ListConnectionsQuery>,
 ) -> Result<Json<ConnectionsResponse>, ApiError> {
-    let connection_repo = ConnectionRepository::new(Arc::new(state.db.clone()));
+    let connection_repo =
+        ConnectionRepository::new(Arc::new(state.db.clone()), state.crypto_key.clone());
     let provider_repo = ProviderRepository::new(Arc::new(state.db.clone()));
 
     let connections = match query.provider {
@@ -138,13 +153,17 @@ mod tests {
     async fn create_test_app() -> (Arc<AppConfig>, axum::Router) {
         let config = Arc::new(AppConfig {
             operator_tokens: vec!["test-token-123".to_string()],
+            crypto_key: Some(vec![0u8; 32]), // Test key
             ..Default::default()
         });
 
         // Create a simple test state - we'll test the logic without requiring a full database
+        let crypto_key =
+            crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
         let state = AppState {
             config: config.clone(),
             db: sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
+            crypto_key,
         };
 
         let app = Router::new()
@@ -208,6 +227,9 @@ mod tests {
             provider: "github".to_string(),
             expires_at: Some("2024-12-31T23:59:59Z".to_string()),
             metadata: serde_json::json!({"user": "test"}),
+            has_access_token: true,
+            has_refresh_token: true,
+            token_encryption_version: 1,
         };
 
         let json = serde_json::to_string(&connection_info).unwrap();
@@ -226,6 +248,9 @@ mod tests {
             provider: "github".to_string(),
             expires_at: None,
             metadata: serde_json::json!({}),
+            has_access_token: false,
+            has_refresh_token: false,
+            token_encryption_version: 1,
         }];
 
         let response = ConnectionsResponse { connections };

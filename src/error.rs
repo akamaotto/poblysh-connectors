@@ -13,6 +13,7 @@ use serde_json::json;
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::telemetry;
 /// Unified API error response structure
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ApiError {
@@ -60,15 +61,12 @@ impl ApiError {
 
     /// Extract current trace ID from the active tracing span (falls back to generated correlation ID)
     fn current_trace_id() -> Option<Box<str>> {
-        let current_span = tracing::Span::current();
-
-        if let Some(span_id) = current_span.id() {
-            return Some(format!("span-{}", span_id.into_u64()).into_boxed_str());
-        }
-
-        // Fallback: generate a correlation ID for basic client-server log correlation
-        // TODO: When OpenTelemetry is integrated, extract actual trace ID from request context
-        Some(format!("corr-{}", &uuid::Uuid::new_v4().to_string()[..8]).into_boxed_str())
+        telemetry::current_trace_id()
+            .map(|trace_id| trace_id.into_boxed_str())
+            .or_else(|| {
+                // Fallback: generate a correlation ID for basic client-server log correlation
+                Some(format!("corr-{}", &uuid::Uuid::new_v4().to_string()[..8]).into_boxed_str())
+            })
     }
 }
 
@@ -325,6 +323,14 @@ pub fn provider_error(provider: String, status: u16, body: Option<String>) -> Ap
 pub fn unauthorized(message: Option<&str>) -> ApiError {
     let msg = message.unwrap_or("Authentication required");
     ApiError::new(StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg)
+}
+
+/// Create an unauthorized error (401) with explicit trace_id
+pub fn unauthorized_with_trace_id(message: Option<&str>, trace_id: String) -> ApiError {
+    let msg = message.unwrap_or("Authentication required");
+    let mut error = ApiError::new(StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg);
+    error.trace_id = Some(trace_id.into_boxed_str());
+    error
 }
 
 /// Create a forbidden error (403)

@@ -65,6 +65,7 @@ Configuration keys use the `POBLYSH_` prefix. The MVP fields are:
 - `POBLYSH_DATABASE_URL` – PostgreSQL connection string (required)
 - `POBLYSH_DB_MAX_CONNECTIONS` – maximum database connections (default: 10)
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS` – connection acquire timeout in milliseconds (default: 5000)
+- `POBLYSH_CRYPTO_KEY` – base64-encoded 32 byte key used to encrypt access/refresh tokens (required)
 
 Example:
 ```bash
@@ -100,6 +101,14 @@ cargo run -- migrate down
 cargo run -- migrate status
 ```
 
+### Token Encryption Backfill
+
+If you enable token encryption on an existing environment, run the helper binary to re-encrypt any legacy plaintext rows:
+
+```bash
+cargo run --bin reencrypt_plaintext_tokens
+```
+
 ## Environment Variables
 
 - `POBLYSH_PROFILE`: Configuration profile to use (default: `local`)
@@ -108,6 +117,7 @@ cargo run -- migrate status
 - `POBLYSH_DATABASE_URL`: PostgreSQL connection string (required)
 - `POBLYSH_DB_MAX_CONNECTIONS`: Maximum database connections (default: 10)
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS`: Connection acquire timeout in milliseconds (default: 5000)
+- `POBLYSH_CRYPTO_KEY`: Base64 string that decodes to 32 bytes; required to encrypt/decrypt stored tokens. Generate with `openssl rand -base64 32`.
 
 Examples:
 ```bash

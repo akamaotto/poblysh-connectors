@@ -5,10 +5,16 @@
 use std::sync::Arc;
 
 use axum::{
-    Router, middleware,
+    Router,
+    extract::Request,
+    http::HeaderValue,
+    middleware,
+    response::Response,
     routing::{get, post},
 };
 use sea_orm::DatabaseConnection;
+use std::time::Duration;
+use tower_http::trace::TraceLayer;
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -17,6 +23,32 @@ use crate::config::AppConfig;
 use crate::crypto::CryptoKey;
 use crate::error::ApiError;
 use crate::handlers;
+use crate::telemetry::{self, TraceContext};
+use uuid::Uuid;
+
+/// Middleware to generate trace_id and store it in request extensions
+async fn trace_middleware(mut request: Request, next: axum::middleware::Next) -> Response {
+    let trace_context = TraceContext {
+        trace_id: Uuid::new_v4().to_string(),
+    };
+    let header_trace_id = trace_context.trace_id.clone();
+
+    // Store TraceContext in request extensions for handlers to access
+    request.extensions_mut().insert(trace_context.clone());
+
+    telemetry::with_trace_context(trace_context, async move {
+        let response = next.run(request).await;
+
+        // Add trace_id to response headers
+        let mut response = response;
+        if let Ok(header_value) = HeaderValue::from_str(&header_trace_id) {
+            response.headers_mut().insert("x-trace-id", header_value);
+        }
+
+        response
+    })
+    .await
+}
 
 /// Application state containing shared resources
 #[derive(Clone)]
@@ -50,11 +82,67 @@ pub fn create_app(state: AppState) -> Router {
             auth_middleware,
         ));
 
-    // Combine all routes
+    // Combine all routes with tracing
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)
+        // Add HTTP request tracing
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| {
+                    let method = request.method().to_string();
+                    let uri = request.uri().to_string();
+                    let trace_ctx = request
+                        .extensions()
+                        .get::<TraceContext>()
+                        .cloned()
+                        .unwrap_or_else(|| TraceContext {
+                            trace_id: Uuid::new_v4().to_string(),
+                        });
+                    let trace_id = trace_ctx.trace_id.clone();
+
+                    let span = tracing::info_span!(
+                        "http_request",
+                        method = %method,
+                        path = %uri,
+                        status = tracing::field::Empty,
+                        latency_ms = tracing::field::Empty,
+                        trace_id = %trace_id,
+                    );
+
+                    span
+                })
+                .on_request(|request: &Request<_>, _span: &tracing::Span| {
+                    // Count sensitive headers for redaction (avoid logging their values)
+                    let headers = request.headers();
+                    let _redacted_count = headers
+                        .iter()
+                        .filter(|(name, _value)| {
+                            let name_str = name.as_str();
+                            name_str.to_lowercase().contains("authorization")
+                                || name_str.to_lowercase().contains("cookie")
+                                || name_str.to_lowercase().contains("set-cookie")
+                        })
+                        .count();
+
+                    tracing::info!("request started",);
+                })
+                .on_response(
+                    |response: &Response<_>, latency: Duration, span: &tracing::Span| {
+                        let status = response.status().to_string();
+                        span.record("status", tracing::field::display(&status));
+                        span.record("latency_ms", tracing::field::display(latency.as_millis()));
+                        tracing::info!(
+                            status = %status,
+                            latency_ms = latency.as_millis(),
+                            "request completed"
+                        );
+                    },
+                ),
+        )
+        // Add trace ID generation middleware
+        .layer(middleware::from_fn(trace_middleware))
 }
 
 /// Starts the server with the given configuration

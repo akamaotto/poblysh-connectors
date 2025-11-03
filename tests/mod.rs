@@ -6,6 +6,8 @@
 #[allow(clippy::duplicate_mod)]
 pub mod auth_integration_tests;
 #[allow(clippy::duplicate_mod)]
+pub mod oauth_callback_integration_tests;
+#[allow(clippy::duplicate_mod)]
 pub mod provider_connection_integration_tests;
 #[allow(clippy::duplicate_mod)]
 pub mod provider_repository_tests;

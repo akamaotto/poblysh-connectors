@@ -7,10 +7,12 @@ Details (MVP):
 - Formatter: JSON output with fields including `timestamp`, `level`, `message`, `target`, and span fields.
 - Filtering: Level configured via `POBLYSH_LOG_LEVEL` (e.g., `info`, `debug`, `trace`).
 - Startup MUST succeed even if no external exporters are configured.
+- Existing `log::` macros MUST emit through the same pipeline via `tracing_log::LogTracer` (or equivalent bridge).
 
 #### Scenario: JSON log record emitted on startup
 - WHEN the service boots with `POBLYSH_LOG_LEVEL=info`
 - THEN a log line is emitted in JSON format including keys `level` and `message`
+- AND a log emitted via `log::info!` appears with the same structured formatting
 
 ### Requirement: HTTP Request Spans
 Incoming HTTP requests MUST be wrapped in `tracing` spans recording method, path, status, and latency.
@@ -24,13 +26,14 @@ Fields (MVP):
 - THEN a JSON log is emitted at request completion including `method`, `path`, `status`, and `latency_ms`
 
 ### Requirement: Correlation ID (trace_id)
-Each request MUST have a correlation identifier (`trace_id`) attached to the span and exposed to handlers. Error responses MUST include the same `trace_id` per the error model.
+Each request MUST have a correlation identifier (`trace_id`) attached to the span and exposed to handlers via a shared `TraceContext` stored in `Request::extensions()`. Error responses MUST include the same `trace_id` per the error model.
 
 #### Scenario: Error response `trace_id` matches logs
 - GIVEN a request causes a handled error
 - WHEN the server responds with an error envelope
 - THEN the body includes `trace_id`
 - AND a log entry for that request contains the same `trace_id`
+- AND the handler can read that `trace_id` from the `TraceContext` extension without re-generating one
 
 ### Requirement: Redaction And Sensitive Data Handling
 The system MUST redact or omit sensitive values from logs.
@@ -50,3 +53,9 @@ The system SHALL support an optional human-readable text format for local debugg
 - GIVEN `POBLYSH_LOG_FORMAT=pretty`
 - WHEN the service starts
 - THEN logs are human-readable (not JSON) with span context
+
+#### Scenario: Unknown format falls back to JSON
+- GIVEN `POBLYSH_LOG_FORMAT=unknown_value`
+- WHEN the service starts
+- THEN logs default to JSON format (graceful fallback)
+- AND the service starts successfully without errors

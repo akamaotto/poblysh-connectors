@@ -132,6 +132,39 @@ impl OAuthStateRepository {
         Ok(oauth_state)
     }
 
+    /// Find OAuth state by provider and state token (without tenant)
+    pub async fn find_by_provider_state(
+        &self,
+        provider: &str,
+        state: &str,
+    ) -> Result<Option<Model>, sea_orm::DbErr> {
+        let result = Entity::find()
+            .filter(oauth_state::Column::Provider.eq(provider))
+            .filter(oauth_state::Column::State.eq(state))
+            // Temporarily disable expires filter for debugging expired state test
+            .filter(oauth_state::Column::ExpiresAt.gt(Utc::now()))
+            .one(&*self.db)
+            .await?;
+
+        Ok(result)
+    }
+
+    /// Find and consume an OAuth state by provider and state token (without tenant)
+    pub async fn find_and_consume_by_provider_state(
+        &self,
+        provider: &str,
+        state: &str,
+    ) -> Result<Option<Model>, sea_orm::DbErr> {
+        let oauth_state = self.find_by_provider_state(provider, state).await?;
+
+        if let Some(ref state_model) = oauth_state {
+            // Delete the state to prevent reuse
+            let _ = Entity::delete_by_id(state_model.id).exec(&*self.db).await?;
+        }
+
+        Ok(oauth_state)
+    }
+
     /// Clean up expired OAuth states
     pub async fn cleanup_expired(&self) -> Result<u64, sea_orm::DbErr> {
         let result = Entity::delete_many()

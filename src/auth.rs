@@ -17,8 +17,9 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::error::{ApiError, unauthorized, validation_error};
+use crate::error::{ApiError, unauthorized, unauthorized_with_trace_id, validation_error};
 use crate::server::AppState;
+use crate::telemetry::TraceContext;
 
 /// Tenant ID wrapper for type safety
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -46,10 +47,16 @@ pub async fn auth_middleware(
 ) -> Result<Response, ApiError> {
     let headers = request.headers().clone();
 
-    let token = extract_bearer_token(&headers)?;
+    // Extract trace_id from request context for consistent error responses
+    let trace_id = request
+        .extensions()
+        .get::<TraceContext>()
+        .map(|ctx| ctx.trace_id.clone());
+
+    let token = extract_bearer_token_with_trace_id(&headers, trace_id.clone())?;
     validate_token(&config, token)?;
 
-    let tenant = extract_tenant_id(&headers)?;
+    let tenant = extract_tenant_id_with_trace_id(&headers, trace_id)?;
     tracing::info!(tenant_id = %tenant.0, "Authenticated operator request");
 
     let mut request = request;
@@ -59,19 +66,42 @@ pub async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
+fn extract_bearer_token_with_trace_id(
+    headers: &HeaderMap,
+    trace_id: Option<String>,
+) -> Result<&str, ApiError> {
+    let trace_id_clone = trace_id.clone();
+
     headers
         .get(AUTHORIZATION)
-        .ok_or_else(|| unauthorized(Some("Missing Authorization header")))
+        .ok_or_else(|| {
+            if let Some(trace_id_val) = trace_id_clone {
+                unauthorized_with_trace_id(Some("Missing Authorization header"), trace_id_val)
+            } else {
+                unauthorized(Some("Missing Authorization header"))
+            }
+        })
         .and_then(|value| {
-            value
-                .to_str()
-                .map_err(|_| unauthorized(Some("Invalid Authorization header")))
+            let trace_id_clone2 = trace_id.clone();
+            value.to_str().map_err(|_| {
+                if let Some(trace_id_val) = trace_id_clone2 {
+                    unauthorized_with_trace_id(Some("Invalid Authorization header"), trace_id_val)
+                } else {
+                    unauthorized(Some("Invalid Authorization header"))
+                }
+            })
         })
         .and_then(|header| {
-            header
-                .strip_prefix("Bearer ")
-                .ok_or_else(|| unauthorized(Some("Authorization header must use Bearer scheme")))
+            header.strip_prefix("Bearer ").ok_or_else(|| {
+                if let Some(trace_id_val) = trace_id {
+                    unauthorized_with_trace_id(
+                        Some("Authorization header must use Bearer scheme"),
+                        trace_id_val,
+                    )
+                } else {
+                    unauthorized(Some("Authorization header must use Bearer scheme"))
+                }
+            })
         })
 }
 
@@ -88,7 +118,10 @@ fn validate_token(config: &AppConfig, token: &str) -> Result<(), ApiError> {
     }
 }
 
-fn extract_tenant_id(headers: &HeaderMap) -> Result<TenantId, ApiError> {
+fn extract_tenant_id_with_trace_id(
+    headers: &HeaderMap,
+    _trace_id: Option<String>,
+) -> Result<TenantId, ApiError> {
     let header_value = headers
         .get("X-Tenant-Id")
         .ok_or_else(|| {
@@ -197,6 +230,8 @@ mod tests {
             .with_state(AppState {
                 config,
                 db: sea_orm::DatabaseConnection::default(),
+                crypto_key: crate::crypto::CryptoKey::new(vec![0u8; 32])
+                    .expect("Failed to create test crypto key"),
             })
             .oneshot(request)
             .await

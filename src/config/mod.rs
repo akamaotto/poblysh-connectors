@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub api_bind_addr: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default = "default_log_format")]
+    pub log_format: String,
     #[serde(default = "default_database_url")]
     pub database_url: String,
     #[serde(default = "default_db_max_connections")]
@@ -26,6 +28,8 @@ pub struct AppConfig {
     pub db_acquire_timeout_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operator_tokens: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crypto_key: Option<Vec<u8>>,
 }
 
 impl Default for AppConfig {
@@ -34,10 +38,12 @@ impl Default for AppConfig {
             profile: default_profile(),
             api_bind_addr: default_api_bind_addr(),
             log_level: default_log_level(),
+            log_format: default_log_format(),
             database_url: default_database_url(),
             db_max_connections: default_db_max_connections(),
             db_acquire_timeout_ms: default_db_acquire_timeout_ms(),
             operator_tokens: Vec::new(),
+            crypto_key: None,
         }
     }
 }
@@ -55,11 +61,24 @@ impl AppConfig {
         if !config.operator_tokens.is_empty() {
             config.operator_tokens = vec!["[REDACTED]".to_string()];
         }
+        // Redact crypto key for security
+        if config.crypto_key.is_some() {
+            config.crypto_key = Some(b"[REDACTED]".to_vec());
+        }
         serde_json::to_string_pretty(&config)
     }
 
     /// Validates the configuration, returning an error if required settings are missing.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate crypto key
+        if let Some(ref key) = self.crypto_key {
+            if key.len() != 32 {
+                return Err(ConfigError::InvalidCryptoKeyLength { length: key.len() });
+            }
+        } else {
+            return Err(ConfigError::MissingCryptoKey);
+        }
+
         // For local and test profiles, require at least one operator token
         if (self.profile == "local" || self.profile == "test") && self.operator_tokens.is_empty() {
             return Err(ConfigError::MissingOperatorTokens);
@@ -84,6 +103,10 @@ fn default_api_bind_addr() -> String {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_log_format() -> String {
+    "json".to_string()
 }
 
 fn default_database_url() -> String {
@@ -113,6 +136,12 @@ pub enum ConfigError {
     },
     #[error("no operator tokens configured; set POBLYSH_OPERATOR_TOKEN or POBLYSH_OPERATOR_TOKENS")]
     MissingOperatorTokens,
+    #[error("crypto key is missing; set POBLYSH_CRYPTO_KEY environment variable")]
+    MissingCryptoKey,
+    #[error("crypto key is invalid base64: {error}")]
+    InvalidCryptoKeyBase64 { error: String },
+    #[error("crypto key must decode to exactly 32 bytes, got {length} bytes")]
+    InvalidCryptoKeyLength { length: usize },
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -156,6 +185,10 @@ impl ConfigLoader {
             .remove("LOG_LEVEL")
             .filter(|v| !v.is_empty())
             .unwrap_or_else(default_log_level);
+        let log_format = layered
+            .remove("LOG_FORMAT")
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(default_log_format);
         let database_url = layered
             .remove("DATABASE_URL")
             .filter(|v| !v.is_empty())
@@ -184,14 +217,35 @@ impl ConfigLoader {
             Vec::new()
         };
 
+        // Parse and validate crypto key
+        let crypto_key = if let Some(key_str) = layered.remove("CRYPTO_KEY") {
+            // Decode base64 e key, Engine as _
+            {
+                use base64::{Engine as _, engine::general_purpose};
+                general_purpose::STANDARD.decode(&key_str).map_err(|e| {
+                    ConfigError::InvalidCryptoKeyBase64 {
+                        error: e.to_string(),
+                    }
+                })?
+            }
+        } else {
+            Vec::new()
+        };
+
         let config = AppConfig {
             profile,
             api_bind_addr,
             log_level,
+            log_format,
             database_url,
             db_max_connections,
             db_acquire_timeout_ms,
             operator_tokens,
+            crypto_key: if crypto_key.is_empty() {
+                None
+            } else {
+                Some(crypto_key)
+            },
         };
 
         // Validate configuration
