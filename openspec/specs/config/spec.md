@@ -70,3 +70,19 @@ The system SHALL log the loaded configuration at debug level with sensitive fiel
 - WHEN debug logging is enabled
 - THEN those values are redacted in logs (e.g., `****`)
 
+### Requirement: Logging Format Configuration
+The system SHALL support a `POBLYSH_LOG_FORMAT` variable to control log output format.
+
+Details (MVP):
+- Accepted values: `json` (default) and `pretty`
+- Unknown values MUST fall back to `json`
+
+#### Scenario: Default format is JSON
+- WHEN `POBLYSH_LOG_FORMAT` is unset
+- THEN logs are emitted in JSON format
+
+#### Scenario: Pretty format selected
+- GIVEN `POBLYSH_LOG_FORMAT=pretty`
+- WHEN the service starts
+- THEN logs are emitted in a human-readable text format
+

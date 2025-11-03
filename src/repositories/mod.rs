@@ -6,7 +6,9 @@
 pub mod connection;
 pub mod oauth_state;
 pub mod provider;
+pub mod sync_job;
 
 pub use connection::ConnectionRepository;
 pub use oauth_state::OAuthStateRepository;
 pub use provider::ProviderRepository;
+pub use sync_job::SyncJobRepository;

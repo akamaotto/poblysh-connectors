@@ -5,6 +5,7 @@
 pub mod connect;
 pub mod connections;
 pub mod providers;
+pub mod webhooks;
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};
 use crate::db::health_check;

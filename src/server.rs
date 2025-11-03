@@ -77,6 +77,10 @@ pub fn create_app(state: AppState) -> Router {
         .route("/protected/ping", get(handlers::protected_ping))
         .route("/connections", get(handlers::connections::list_connections))
         .route("/connect/{provider}", post(handlers::connect::start_oauth))
+        .route(
+            "/webhooks/{provider}",
+            post(handlers::webhooks::ingest_webhook),
+        )
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.config),
             auth_middleware,
@@ -204,6 +208,7 @@ pub async fn run_server(
         crate::handlers::connections::list_connections,
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
+        crate::handlers::webhooks::ingest_webhook,
     ),
     components(
         schemas(
@@ -222,6 +227,8 @@ pub async fn run_server(
             crate::handlers::connect::ConnectionInfo,
             crate::handlers::connect::AuthorizeUrlResponse,
             crate::handlers::ReadinessResponse,
+            crate::handlers::webhooks::WebhookAcceptResponse,
+            crate::handlers::webhooks::ProviderPath,
         ),
     ),
     modifiers(&SecurityAddon),
@@ -238,6 +245,7 @@ pub async fn run_server(
         (name = "health", description = "Health check endpoints"),
         (name = "operators", description = "Operator-scoped endpoints"),
         (name = "providers", description = "Provider listing endpoints"),
+        (name = "webhooks", description = "Webhook ingest endpoints"),
     ),
     security(
         ("bearer_auth" = []),
