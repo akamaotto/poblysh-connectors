@@ -4,13 +4,17 @@
 
 use std::sync::Arc;
 
-use axum::{Router, middleware, routing::get};
+use axum::{
+    Router, middleware,
+    routing::{get, post},
+};
 use sea_orm::DatabaseConnection;
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::auth::auth_middleware;
 use crate::config::AppConfig;
+use crate::crypto::CryptoKey;
 use crate::error::ApiError;
 use crate::handlers;
 
@@ -19,6 +23,7 @@ use crate::handlers;
 pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db: DatabaseConnection,
+    pub crypto_key: CryptoKey,
 }
 
 /// Creates and configures the Axum application router
@@ -29,12 +34,17 @@ pub fn create_app(state: AppState) -> Router {
         .route("/healthz", get(handlers::health))
         .route("/readyz", get(handlers::ready))
         .route("/providers", get(handlers::providers::list_providers))
+        .route(
+            "/connect/{provider}/callback",
+            get(handlers::connect::oauth_callback),
+        )
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()));
 
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .route("/protected/ping", get(handlers::protected_ping))
         .route("/connections", get(handlers::connections::list_connections))
+        .route("/connect/{provider}", post(handlers::connect::start_oauth))
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.config),
             auth_middleware,
@@ -53,9 +63,21 @@ pub async fn run_server(
     db: DatabaseConnection,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let shared_config = Arc::new(config);
+
+    // Create crypto key from config
+    let crypto_key = CryptoKey::new(
+        shared_config
+            .crypto_key
+            .as_ref()
+            .ok_or("Crypto key is required")?
+            .clone(),
+    )
+    .map_err(|e| format!("Failed to create crypto key: {}", e))?;
+
     let state = AppState {
         config: Arc::clone(&shared_config),
         db,
+        crypto_key,
     };
     let app = create_app(state);
 
@@ -76,6 +98,15 @@ pub async fn run_server(
 /// OpenAPI documentation
 #[derive(OpenApi)]
 #[openapi(
+    info(
+        title = "Poblysh Connectors API",
+        version = "0.1.0",
+        description = "API for managing connector integrations with secure token encryption using AES-256-GCM",
+        license(
+            name = "Security Notice",
+            url = "https://docs.poblysh.com/security"
+        )
+    ),
     paths(
         crate::handlers::root,
         crate::handlers::health,
@@ -83,6 +114,8 @@ pub async fn run_server(
         crate::handlers::protected_ping,
         crate::handlers::providers::list_providers,
         crate::handlers::connections::list_connections,
+        crate::handlers::connect::start_oauth,
+        crate::handlers::connect::oauth_callback,
     ),
     components(
         schemas(
@@ -95,6 +128,12 @@ pub async fn run_server(
             crate::handlers::connections::ConnectionInfo,
             crate::handlers::connections::ConnectionsResponse,
             crate::handlers::connections::ListConnectionsQuery,
+            crate::handlers::connect::ProviderPath,
+            crate::handlers::connect::OAuthCallbackQuery,
+            crate::handlers::connect::ConnectionResponse,
+            crate::handlers::connect::ConnectionInfo,
+            crate::handlers::connect::AuthorizeUrlResponse,
+            crate::handlers::ReadinessResponse,
         ),
     ),
     modifiers(&SecurityAddon),
@@ -131,7 +170,7 @@ impl Modify for SecurityAddon {
                 Http::builder()
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("Opaque token")
-                    .description(Some("Operator bearer token"))
+                    .description(Some("Operator bearer token. User tokens are stored at rest using AES-256-GCM encryption with tenant-context binding"))
                     .build(),
             ),
         );
