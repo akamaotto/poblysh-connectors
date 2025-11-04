@@ -80,40 +80,23 @@ Constraints/Indices:
 - THEN the operation fails due to primary key violation
 
 ### Requirement: Connection Entity Schema
-The system SHALL define a `connections` table representing tenant-scoped authorizations for a given provider and external account/workspace. Connections MUST be uniquely identified per `(tenant_id, provider_slug, external_id)`.
+The `metadata` JSONB column MUST support a `sync` object with the following scheduler fields:
+- `interval_seconds` (integer, optional, bounded between 60 and `config.max_overridden_interval_seconds` (default 86400))
+- `next_run_at` (TIMESTAMPTZ, optional, UTC)
+- `last_jitter_seconds` (integer, optional, >= 0)
+- `first_activated_at` (TIMESTAMPTZ, optional, UTC)
 
-Columns (MVP):
-- `id UUID PRIMARY KEY NOT NULL`
-- `tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE`
-- `provider_slug TEXT NOT NULL REFERENCES providers(slug)`
-- `external_id TEXT NOT NULL` (provider-specific account/workspace/user/install id)
-- `status TEXT NOT NULL DEFAULT 'active'` (enum-like: `active`, `revoked`, `error`)
-- `scopes TEXT[] NULL` (granted scopes if applicable)
-- `access_token_ciphertext BYTEA NULL` (opaque; to be encrypted by crypto module in later change)
-- `refresh_token_ciphertext BYTEA NULL`
-- `expires_at TIMESTAMPTZ NULL`
-- `metadata JSONB NULL` (opaque provider-specific details)
-- `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
-- `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+Scheduler updates MUST persist `sync.next_run_at` and `sync.last_jitter_seconds` atomically with job scheduling, and values outside the allowed range MUST be rejected.
 
-Constraints/Indices:
-- Unique index on `(tenant_id, provider_slug, external_id)`
-- Index on `tenant_id`
+#### Scenario: Scheduler metadata persisted atomically
+- **WHEN** a scheduler tick enqueues an incremental job
+- **THEN** the corresponding `connections.metadata.sync` object is updated in the same transaction with the computed `next_run_at` and `last_jitter_seconds`
 
-#### Scenario: Insert connection succeeds
-- GIVEN an existing tenant and provider
-- WHEN inserting a new `(tenant_id, provider_slug, external_id)`
-- THEN the row is created and timestamps are set
-
-#### Scenario: Duplicate tuple rejected
-- GIVEN a connection exists for `(tenant_id=T, provider_slug='github', external_id='org:42')`
-- WHEN inserting another row with the same tuple
-- THEN the operation fails due to unique constraint
-
-#### Scenario: Tenant isolation enforced
-- GIVEN two tenants `T1`, `T2`
-- WHEN each inserts a connection with the same `(provider_slug, external_id)`
-- THEN both rows exist because uniqueness is scoped per tenant
+#### Scenario: Interval override exceeds configuration
+- **GIVEN** `config.max_overridden_interval_seconds = 3600`
+- **AND** `connections.metadata.sync.interval_seconds = 7200`
+- **WHEN** the scheduler persists metadata for the connection
+- **THEN** it rejects the override value, stores the default interval instead, and logs a validation warning
 
 ### Requirement: Repository Layer (Providers, Connections)
 The system SHALL provide a thin repository layer encapsulating SeaORM operations for providers and connections with clear, tenant-aware methods.
@@ -206,4 +189,37 @@ Indices:
 - GIVEN a `failed` job with backoff
 - WHEN setting `retry_after` in the future
 - THEN job pickers exclude it until `retry_after <= now()`
+
+### Requirement: Sync Jobs Partial Unique Index
+The system MUST create a partial unique index on `sync_jobs` to prevent duplicate interval jobs per connection. The index enforces uniqueness across `(connection_id, job_type)` only for rows with `status IN ('queued', 'running')`.
+
+Index definition:
+```sql
+CREATE UNIQUE INDEX idx_sync_jobs_connection_type_status 
+ON sync_jobs (connection_id, job_type) 
+WHERE status IN ('queued', 'running');
+```
+
+This index MUST be created in a migration script and ensures that:
+- Only one interval job can be queued/running per connection at a time
+- Failed/completed jobs don't count toward the uniqueness constraint
+- Multiple different job types (e.g., 'incremental', 'full') can coexist for the same connection
+
+#### Scenario: Duplicate interval job prevented by index
+- **GIVEN** an incremental sync_job exists for connection `C` with `status = 'queued'`
+- **WHEN** the scheduler attempts to enqueue another incremental job for `C`
+- **THEN** the database rejects the insert with a unique constraint violation
+- **AND** the scheduler treats this as a no-op and continues without error
+
+#### Scenario: Different job types allowed
+- **GIVEN** connection `C` has a running incremental sync_job
+- **WHEN** the scheduler attempts to enqueue a full sync job for `C`
+- **THEN** the insert succeeds because job_type differs ('incremental' vs 'full')
+- **AND** both jobs can proceed concurrently
+
+#### Scenario: Completed jobs don't block new scheduling
+- **GIVEN** connection `C` has an incremental sync_job with `status = 'completed'`
+- **WHEN** the scheduler attempts to enqueue a new incremental job for `C`
+- **THEN** the insert succeeds because the completed job doesn't match the index filter
+- **AND** the scheduler proceeds with normal scheduling logic
 
