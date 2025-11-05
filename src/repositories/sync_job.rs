@@ -14,6 +14,27 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::models::sync_job::{ActiveModel, Entity, Model};
+use chrono::DateTime;
+
+/// Configuration for listing jobs with filters
+#[derive(Debug, Default)]
+pub struct ListJobsConfig {
+    pub status: Option<String>,
+    pub provider: Option<String>,
+    pub connection_id: Option<Uuid>,
+    pub job_type: Option<String>,
+    pub started_after: Option<DateTime<Utc>>,
+    pub finished_after: Option<DateTime<Utc>>,
+}
+
+/// Result of listing jobs with cursor pagination
+#[derive(Debug)]
+pub struct ListJobsResult {
+    /// Jobs for the current page
+    pub jobs: Vec<Model>,
+    /// Cursor for the next page (None if no more pages)
+    pub next_cursor: Option<(sea_orm::prelude::DateTimeWithTimeZone, Uuid)>,
+}
 
 /// Repository for sync job database operations
 pub struct SyncJobRepository {
@@ -186,5 +207,92 @@ impl SyncJobRepository {
         })?;
 
         Ok(updated_job)
+    }
+
+    /// List jobs with cursor pagination and comprehensive filtering
+    /// Jobs are ordered by scheduled_at DESC, id DESC for consistent pagination
+    pub async fn list_jobs(
+        &self,
+        tenant_id: Uuid,
+        limit: i64,
+        cursor: Option<(sea_orm::prelude::DateTimeWithTimeZone, Uuid)>,
+        config: ListJobsConfig,
+    ) -> Result<ListJobsResult, ApiError> {
+        use sea_orm::{Condition, QuerySelect};
+
+        let mut query = Entity::find()
+            .filter(Column::TenantId.eq(tenant_id))
+            .order_by_desc(Column::ScheduledAt)
+            .order_by_desc(Column::Id);
+
+        // Apply cursor if provided for pagination
+        if let Some((scheduled_at, id)) = cursor {
+            query = query.filter(
+                Condition::any()
+                    .add(Column::ScheduledAt.lt(scheduled_at))
+                    .add(
+                        Condition::all()
+                            .add(Column::ScheduledAt.eq(scheduled_at))
+                            .add(Column::Id.lt(id)),
+                    ),
+            );
+        }
+
+        // Apply filters
+        if let Some(ref status_filter) = config.status {
+            query = query.filter(Column::Status.eq(status_filter));
+        }
+
+        if let Some(ref provider_filter) = config.provider {
+            query = query.filter(Column::ProviderSlug.eq(provider_filter));
+        }
+
+        if let Some(connection_id_filter) = config.connection_id {
+            query = query.filter(Column::ConnectionId.eq(connection_id_filter));
+        }
+
+        if let Some(ref job_type_filter) = config.job_type {
+            query = query.filter(Column::JobType.eq(job_type_filter));
+        }
+
+        if let Some(started_after_filter) = config.started_after {
+            query = query.filter(Column::StartedAt.gte(started_after_filter.fixed_offset()));
+        }
+
+        if let Some(finished_after_filter) = config.finished_after {
+            query = query.filter(Column::FinishedAt.gte(finished_after_filter.fixed_offset()));
+        }
+
+        // Fetch one extra record to determine if there are more pages
+        let results = query
+            .limit(Some(limit as u64 + 1))
+            .all(&self.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to list jobs with cursor: {}", e);
+                ApiError::new(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_SERVER_ERROR",
+                    "Failed to list jobs",
+                )
+            })?;
+
+        // Determine if there are more pages and extract the jobs for the current page
+        let has_more = results.len() > limit as usize;
+        let jobs = if has_more {
+            results.into_iter().take(limit as usize).collect()
+        } else {
+            results
+        };
+
+        // Determine next cursor
+        let next_cursor = if has_more {
+            jobs.last()
+                .map(|last_job| (last_job.scheduled_at, last_job.id))
+        } else {
+            None
+        };
+
+        Ok(ListJobsResult { jobs, next_cursor })
     }
 }

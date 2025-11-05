@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 
 use crate::telemetry;
 /// Unified API error response structure
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ApiError {
     /// HTTP status code for the response
     #[serde(skip_serializing, skip_deserializing)]

@@ -86,6 +86,7 @@ pub fn create_app(state: AppState) -> Router {
     let protected_routes = Router::new()
         .route("/protected/ping", get(handlers::protected_ping))
         .route("/connections", get(handlers::connections::list_connections))
+        .route("/jobs", get(handlers::jobs::list_jobs))
         .route("/connect/{provider}", post(handlers::connect::start_oauth))
         .route(
             "/webhooks/{provider}",
@@ -216,6 +217,7 @@ pub async fn run_server(
         crate::handlers::protected_ping,
         crate::handlers::providers::list_providers,
         crate::handlers::connections::list_connections,
+        crate::handlers::jobs::list_jobs,
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
         crate::handlers::webhooks::ingest_webhook,
@@ -232,6 +234,11 @@ pub async fn run_server(
             crate::handlers::connections::ConnectionInfo,
             crate::handlers::connections::ConnectionsResponse,
             crate::handlers::connections::ListConnectionsQuery,
+            crate::handlers::jobs::JobInfo,
+            crate::handlers::jobs::JobsResponse,
+            crate::handlers::jobs::JobStatusParam,
+            crate::handlers::jobs::JobTypeParam,
+
             crate::handlers::connect::ProviderPath,
             crate::handlers::connect::OAuthCallbackQuery,
             crate::handlers::connect::ConnectionResponse,
@@ -259,6 +266,7 @@ pub async fn run_server(
         (name = "operators", description = "Operator-scoped endpoints"),
         (name = "providers", description = "Provider listing endpoints"),
         (name = "webhooks", description = "Webhook ingest endpoints"),
+        (name = "jobs", description = "Jobs listing and management endpoints"),
     ),
     security(
         ("bearer_auth" = []),

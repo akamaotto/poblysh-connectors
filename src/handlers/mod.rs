@@ -4,6 +4,7 @@
 
 pub mod connect;
 pub mod connections;
+pub mod jobs;
 pub mod providers;
 pub mod webhooks;
 

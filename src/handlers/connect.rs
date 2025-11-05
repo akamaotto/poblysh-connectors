@@ -661,7 +661,7 @@ mod tests {
                     Ok(results) => {
                         println!("Tables in database:");
                         for result in results {
-                            if let Some(name) = result.try_get_by_index::<String>(0).ok() {
+                            if let Ok(name) = result.try_get_by_index::<String>(0) {
                                 println!("  - {}", name);
                             }
                         }
