@@ -5,6 +5,7 @@
 //! and retry logic.
 
 use chrono::Utc;
+use metrics::{counter, histogram};
 use rand::{Rng, thread_rng};
 use sea_orm::prelude::*;
 use sea_orm::{
@@ -16,7 +17,9 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::connectors::{SyncParams, SyncResult, registry::Registry};
+use crate::connectors::{
+    ConnectorError, SyncError, SyncErrorKind, SyncParams, SyncResult, registry::Registry,
+};
 use crate::models::{
     connection::{ActiveModel as ConnectionActiveModel, Entity as ConnectionEntity},
     signal::ActiveModel as SignalActiveModel,
@@ -56,21 +59,66 @@ pub struct SyncExecutor {
     pub db: std::sync::Arc<DatabaseConnection>,
     pub registry: std::sync::Arc<Registry>,
     config: ExecutorConfig,
+    rate_limit_policy: crate::config::RateLimitPolicyConfig,
 }
 
 impl SyncExecutor {
     /// Create a new sync executor
-    pub fn new(db: DatabaseConnection, registry: Registry, config: ExecutorConfig) -> Self {
+    pub fn new(
+        db: DatabaseConnection,
+        registry: Registry,
+        config: ExecutorConfig,
+        rate_limit_policy: crate::config::RateLimitPolicyConfig,
+    ) -> Self {
         Self {
             db: std::sync::Arc::new(db),
             registry: std::sync::Arc::new(registry),
             config,
+            rate_limit_policy,
         }
     }
 
     /// Get the executor configuration
     pub fn config(&self) -> &ExecutorConfig {
         &self.config
+    }
+
+    /// Calculate retry backoff based on rate limit policy and error
+    fn calculate_backoff(
+        &self,
+        sync_error: &SyncError,
+        attempts_completed: i32,
+        provider_slug: &str,
+    ) -> (f64, bool) {
+        // Get provider-specific override or use default policy
+        let policy = self.rate_limit_policy.provider_overrides.get(provider_slug);
+
+        let base_seconds = policy
+            .and_then(|p| p.base_seconds)
+            .unwrap_or(self.rate_limit_policy.base_seconds) as f64;
+        let max_seconds = policy
+            .and_then(|p| p.max_seconds)
+            .unwrap_or(self.rate_limit_policy.max_seconds) as f64;
+        let jitter_factor = policy
+            .and_then(|p| p.jitter_factor)
+            .unwrap_or(self.rate_limit_policy.jitter_factor);
+
+        let mut backoff = (base_seconds * 2_f64.powi(attempts_completed)).min(max_seconds);
+
+        // If the error provides retry_after_secs, prefer the max of that and our calculated backoff
+        if let SyncErrorKind::RateLimited { retry_after_secs } = &sync_error.kind {
+            if let Some(retry_after) = retry_after_secs {
+                backoff = backoff.max(*retry_after as f64);
+            }
+        }
+
+        // Apply jitter
+        let jitter = thread_rng().gen_range(0.0..(jitter_factor * backoff));
+        let final_backoff = backoff + jitter;
+
+        let is_rate_limited = matches!(sync_error.kind, SyncErrorKind::RateLimited { .. });
+
+        (final_backoff, is_rate_limited)
     }
 
     /// Run the executor loop
@@ -250,8 +298,7 @@ impl SyncExecutor {
                     }
                     Err(e) => {
                         error!("Error handling success for job {}: {}", job.id, e);
-                        self.handle_failure(&job, &format!("Success handling failed: {}", e))
-                            .await?;
+                        self.handle_failure(&job, &e.to_string(), None).await?;
                         Err(e)
                     }
                 }
@@ -259,7 +306,16 @@ impl SyncExecutor {
             Err(e) => {
                 let execution_time = start_time.elapsed();
                 warn!("Job {} failed after {:?}: {}", job.id, execution_time, e);
-                self.handle_failure(&job, &format!("{}", e)).await?;
+
+                // Try to extract SyncError from the error or convert from ConnectorError
+                let sync_error = e.downcast_ref::<SyncError>().cloned().or_else(|| {
+                    // Try to convert from ConnectorError
+                    e.downcast_ref::<ConnectorError>()
+                        .map(|connector_err| SyncError::from(connector_err.clone()))
+                });
+
+                self.handle_failure(&job, &e.to_string(), sync_error.as_ref())
+                    .await?;
                 Err(e)
             }
         }
@@ -401,45 +457,73 @@ impl SyncExecutor {
         &self,
         job: &sync_job::Model,
         error_msg: &str,
+        sync_error: Option<&SyncError>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let txn = self.db.begin().await?;
         let now = Utc::now();
 
-        // Calculate backoff with jitter
-        let base_seconds = 5;
-        let max_seconds = 900; // 15 minutes
-        let jitter_factor = 0.1;
-
         // job.attempts already includes the current attempt (incremented during claim)
         let attempts_completed = job.attempts.max(0);
         let prior_failures = attempts_completed.saturating_sub(1).max(0);
-        let exp_backoff =
-            (base_seconds as f64 * 2_f64.powi(prior_failures)).min(max_seconds as f64);
-        let jitter = thread_rng().gen_range(0.0..(jitter_factor * exp_backoff));
-        let backoff_seconds = exp_backoff + jitter;
+
+        // Calculate backoff using rate limit policy if we have a SyncError
+        let (backoff_seconds, is_rate_limited) = if let Some(sync_err) = sync_error {
+            self.calculate_backoff(sync_err, prior_failures, &job.provider_slug)
+        } else {
+            // Fallback to old logic for non-SyncError cases
+            let base_seconds = 5.0;
+            let max_seconds = 900.0; // 15 minutes
+            let jitter_factor = 0.1;
+            let exp_backoff = (base_seconds * 2_f64.powi(prior_failures)).min(max_seconds);
+            let jitter = thread_rng().gen_range(0.0..(jitter_factor * exp_backoff));
+            (exp_backoff + jitter, false)
+        };
 
         let retry_after = now + chrono::Duration::seconds(backoff_seconds as i64);
+
+        // Build error details
+        let mut error_details = serde_json::json!({
+            "message": error_msg,
+            "attempts": attempts_completed,
+            "backoff_seconds": backoff_seconds,
+            "timestamp": now.to_rfc3339(),
+        });
+
+        // Add sync error details if available
+        if let Some(sync_err) = sync_error {
+            error_details["sync_error"] = serde_json::to_value(sync_err)?;
+            if is_rate_limited {
+                error_details["is_rate_limited"] = serde_json::Value::Bool(true);
+
+                // Record rate limit metrics
+                let metric_labels = vec![("provider", job.provider_slug.clone())];
+                counter!("rate_limited_total", &metric_labels).increment(1);
+                histogram!("rate_limited_backoff_seconds", &metric_labels).record(backoff_seconds);
+            }
+        }
 
         // Update job status back to queued with retry_after
         let mut active_job: SyncJobActiveModel = job.clone().into();
         active_job.status = Set("queued".to_string());
         active_job.attempts = Set(attempts_completed);
         active_job.retry_after = Set(Some(retry_after.into()));
-        active_job.error = Set(Some(serde_json::json!({
-            "message": error_msg,
-            "attempts": attempts_completed,
-            "backoff_seconds": backoff_seconds,
-            "timestamp": now.to_rfc3339(),
-        })));
+        active_job.error = Set(Some(error_details));
         active_job.updated_at = Set(now.into());
         active_job.update(&txn).await?;
 
         txn.commit().await?;
 
-        warn!(
-            "Job {} failed (attempt {}), retrying after {:.1}s: {}",
-            job.id, attempts_completed, backoff_seconds, error_msg
-        );
+        if is_rate_limited {
+            warn!(
+                "Job {} rate limited (attempt {}), retrying after {:.1}s: {}",
+                job.id, attempts_completed, backoff_seconds, error_msg
+            );
+        } else {
+            warn!(
+                "Job {} failed (attempt {}), retrying after {:.1}s: {}",
+                job.id, attempts_completed, backoff_seconds, error_msg
+            );
+        }
 
         Ok(())
     }
@@ -452,6 +536,185 @@ impl Clone for SyncExecutor {
             db: self.db.clone(),
             registry: self.registry.clone(),
             config: self.config.clone(),
+            rate_limit_policy: self.rate_limit_policy.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RateLimitProviderOverride;
+    use std::collections::BTreeMap;
+
+    fn create_test_rate_limit_policy() -> crate::config::RateLimitPolicyConfig {
+        crate::config::RateLimitPolicyConfig {
+            base_seconds: 5,
+            max_seconds: 900,
+            jitter_factor: 0.1,
+            provider_overrides: BTreeMap::new(),
+        }
+    }
+
+    async fn create_test_executor(policy: crate::config::RateLimitPolicyConfig) -> SyncExecutor {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory database");
+        let registry = Registry::new();
+        let config = ExecutorConfig::default();
+        SyncExecutor::new(db, registry, config, policy)
+    }
+
+    #[tokio::test]
+    async fn test_calculate_backoff_default_policy() {
+        let policy = create_test_rate_limit_policy();
+        let executor = create_test_executor(policy).await;
+
+        let sync_error = SyncError::rate_limited(None);
+
+        // Test exponential backoff with attempts
+        let (backoff1, is_rate_limited) =
+            executor.calculate_backoff(&sync_error, 0, "test_provider");
+        assert!(is_rate_limited);
+        assert!((backoff1 >= 5.0 && backoff1 <= 5.5)); // base * 2^0 = 5, jitter may add 0-0.5
+
+        let (backoff2, _) = executor.calculate_backoff(&sync_error, 1, "test_provider");
+        assert!((backoff2 >= 10.0 && backoff2 <= 11.0)); // base * 2^1 = 10, jitter may add 0-1
+
+        let (backoff3, _) = executor.calculate_backoff(&sync_error, 2, "test_provider");
+        assert!((backoff3 >= 20.0 && backoff3 <= 22.0)); // base * 2^2 = 20, jitter may add 0-2
+    }
+
+    #[tokio::test]
+    async fn test_calculate_backoff_with_provider_override() {
+        let mut provider_overrides = BTreeMap::new();
+        provider_overrides.insert(
+            "github".to_string(),
+            RateLimitProviderOverride {
+                base_seconds: Some(10),
+                max_seconds: Some(1800),
+                jitter_factor: Some(0.2),
+            },
+        );
+
+        let policy = crate::config::RateLimitPolicyConfig {
+            base_seconds: 5,
+            max_seconds: 900,
+            jitter_factor: 0.1,
+            provider_overrides,
+        };
+
+        let executor = create_test_executor(policy).await;
+        let sync_error = SyncError::rate_limited(None);
+
+        // Test that github provider gets override settings
+        let (backoff, _) = executor.calculate_backoff(&sync_error, 0, "github");
+        assert!((backoff >= 10.0 && backoff <= 12.0)); // override base = 10, jitter 0-2
+
+        // Test that non-override provider gets default settings
+        let (backoff, _) = executor.calculate_backoff(&sync_error, 0, "jira");
+        assert!((backoff >= 5.0 && backoff <= 5.5)); // default base = 5, jitter 0-0.5
+    }
+
+    #[tokio::test]
+    async fn test_calculate_backoff_retry_after_precedence() {
+        let policy = create_test_rate_limit_policy();
+        let executor = create_test_executor(policy).await;
+
+        // Test that retry_after_secs takes precedence over calculated backoff when larger
+        let sync_error = SyncError::rate_limited(Some(300)); // 5 minutes
+        let (backoff, _) = executor.calculate_backoff(&sync_error, 0, "test_provider");
+        assert!((backoff >= 300.0 && backoff <= 330.0)); // Should use retry_after (300) not calculated (5), jitter up to 30
+
+        // Test that retry_after_secs takes precedence over calculated backoff when smaller
+        let sync_error = SyncError::rate_limited(Some(2)); // 2 seconds
+        let (backoff, _) = executor.calculate_backoff(&sync_error, 3, "test_provider"); // 3 attempts = 5*2^3 = 40
+        assert!((backoff >= 40.0 && backoff <= 44.0)); // Should use calculated (40) not retry_after (2), jitter up to 4
+    }
+
+    #[tokio::test]
+    async fn test_calculate_backoff_max_capping() {
+        let policy = create_test_rate_limit_policy();
+        let executor = create_test_executor(policy).await;
+
+        let sync_error = SyncError::rate_limited(None);
+
+        // Test with high attempts to exceed max
+        let (backoff, _) = executor.calculate_backoff(&sync_error, 10, "test_provider");
+        assert!(backoff <= 900.0 + (900.0 * 0.1)); // Should not exceed max + jitter
+        assert!(backoff >= 900.0); // Should be at least max
+    }
+
+    #[tokio::test]
+    async fn test_sync_error_creation() {
+        let unauthorized = SyncError::unauthorized("Invalid token");
+        matches!(unauthorized.kind, SyncErrorKind::Unauthorized);
+
+        let rate_limited = SyncError::rate_limited(Some(60));
+        if let SyncErrorKind::RateLimited { retry_after_secs } = rate_limited.kind {
+            assert_eq!(retry_after_secs, Some(60));
+        } else {
+            panic!("Expected RateLimited variant");
+        }
+
+        let transient = SyncError::transient("Network error");
+        matches!(transient.kind, SyncErrorKind::Transient);
+
+        let permanent = SyncError::permanent("Invalid configuration");
+        matches!(permanent.kind, SyncErrorKind::Permanent);
+    }
+
+    #[tokio::test]
+    async fn test_sync_error_with_details() {
+        let details = serde_json::json!({"status_code": 429, "reset_time": "2024-01-01T00:00:00Z"});
+        let error = SyncError::rate_limited_with_message(Some(60), "API rate limit exceeded")
+            .with_details(details.clone());
+
+        assert!(error.details.as_ref().unwrap().get("status_code").is_some());
+        if let SyncErrorKind::RateLimited { retry_after_secs } = error.kind {
+            assert_eq!(retry_after_secs, Some(60));
+        } else {
+            panic!("Expected RateLimited variant");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connector_error_to_sync_error_conversion() {
+        // Test RateLimitError conversion
+        let rate_limit_error = ConnectorError::RateLimitError {
+            retry_after: Some(300),
+            limit: Some(100),
+        };
+        let sync_error = SyncError::from(rate_limit_error);
+
+        if let SyncErrorKind::RateLimited { retry_after_secs } = sync_error.kind {
+            assert_eq!(retry_after_secs, Some(300));
+        } else {
+            panic!("Expected RateLimited variant");
+        }
+
+        // Test AuthenticationError conversion
+        let auth_error = ConnectorError::AuthenticationError {
+            details: "Invalid token".to_string(),
+            error_code: Some("AUTH_001".to_string()),
+        };
+        let sync_error = SyncError::from(auth_error);
+        matches!(sync_error.kind, SyncErrorKind::Unauthorized);
+
+        // Test retryable NetworkError conversion
+        let network_error = ConnectorError::NetworkError {
+            details: "Connection timeout".to_string(),
+            retryable: true,
+        };
+        let sync_error = SyncError::from(network_error);
+        matches!(sync_error.kind, SyncErrorKind::Transient);
+
+        // Test non-retryable NetworkError conversion
+        let network_error = ConnectorError::NetworkError {
+            details: "Invalid endpoint".to_string(),
+            retryable: false,
+        };
+        let sync_error = SyncError::from(network_error);
+        matches!(sync_error.kind, SyncErrorKind::Permanent);
     }
 }

@@ -66,6 +66,11 @@ pub fn create_app(state: AppState) -> Router {
         .route("/", get(handlers::root))
         .route("/healthz", get(handlers::health))
         .route("/readyz", get(handlers::ready))
+        .route(
+            "/config/rate-limit-policy",
+            get(handlers::config::get_rate_limit_policy_config),
+        )
+        .route("/config/summary", get(handlers::config::get_config_summary))
         .route("/providers", get(handlers::providers::list_providers))
         .route(
             "/connect/{provider}/callback",
@@ -85,6 +90,11 @@ pub fn create_app(state: AppState) -> Router {
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .route("/protected/ping", get(handlers::protected_ping))
+        .route(
+            "/config/rate-limit-policy",
+            get(handlers::config::get_rate_limit_policy_config),
+        )
+        .route("/config/summary", get(handlers::config::get_config_summary))
         .route("/connections", get(handlers::connections::list_connections))
         .route("/jobs", get(handlers::jobs::list_jobs))
         .route("/signals", get(handlers::signals::list_signals))
@@ -165,7 +175,7 @@ pub fn create_app(state: AppState) -> Router {
 pub async fn run_server(
     config: AppConfig,
     db: DatabaseConnection,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_config = Arc::new(config);
 
     // Create crypto key from config
@@ -216,6 +226,8 @@ pub async fn run_server(
         crate::handlers::health,
         crate::handlers::ready,
         crate::handlers::protected_ping,
+        crate::handlers::config::get_rate_limit_policy_config,
+        crate::handlers::config::get_config_summary,
         crate::handlers::providers::list_providers,
         crate::handlers::connections::list_connections,
         crate::handlers::jobs::list_jobs,
@@ -254,6 +266,8 @@ pub async fn run_server(
             crate::handlers::webhooks::ProviderPath,
             crate::handlers::webhooks::GitHubSignatureHeader,
             crate::handlers::webhooks::SlackSignatureHeaders,
+        crate::config::RateLimitPolicyConfig,
+        crate::config::RateLimitProviderOverride,
         ),
     ),
     modifiers(&SecurityAddon),
@@ -268,6 +282,7 @@ pub async fn run_server(
     tags(
         (name = "root", description = "Root endpoint"),
         (name = "health", description = "Health check endpoints"),
+        (name = "configuration", description = "Configuration endpoints"),
         (name = "operators", description = "Operator-scoped endpoints"),
         (name = "providers", description = "Provider listing endpoints"),
         (name = "webhooks", description = "Webhook ingest endpoints"),

@@ -4,6 +4,7 @@
 mod test_utils;
 use anyhow::Result;
 
+use connectors::config::RateLimitPolicyConfig;
 use connectors::connectors::registry::Registry;
 use connectors::seeds::seed_providers;
 use connectors::sync_executor::{ExecutorConfig, SyncExecutor};
@@ -20,8 +21,9 @@ async fn test_sync_executor_basic_functionality() -> Result<()> {
 
     // Create executor
     let config = ExecutorConfig::default();
+    let rate_limit_policy = RateLimitPolicyConfig::default();
     let registry = Registry::global().read().unwrap().clone();
-    let executor = SyncExecutor::new(db.clone(), registry, config);
+    let executor = SyncExecutor::new(db.clone(), registry, config, rate_limit_policy);
 
     // Test that executor was created successfully
     assert_eq!(

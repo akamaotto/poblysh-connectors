@@ -3,7 +3,10 @@
 //! This is the main entry point for the Connectors API service.
 
 use clap::{Parser, Subcommand};
-use connectors::{config::ConfigLoader, connectors::Registry, db, server::run_server, telemetry};
+use connectors::{
+    config::ConfigLoader, connectors::Registry, db, server::run_server,
+    sync_executor::ExecutorConfig, telemetry,
+};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::DatabaseConnection;
 
@@ -22,6 +25,10 @@ enum Commands {
         #[command(subcommand)]
         action: MigrateAction,
     },
+    /// Run the sync executor service
+    SyncExecutor,
+    /// Run both API server and sync executor
+    RunAll,
 }
 
 #[derive(Subcommand)]
@@ -35,7 +42,7 @@ enum MigrateAction {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     // Load configuration from layered env files and variables
@@ -53,6 +60,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match command {
             Commands::Migrate { action } => {
                 handle_migrate_command(&db, action).await?;
+                return Ok(());
+            }
+            Commands::SyncExecutor => {
+                handle_sync_executor_command(config, db).await?;
+                return Ok(());
+            }
+            Commands::RunAll => {
+                println!("Starting both API server and sync executor...");
+
+                // For now, run the server first
+                println!("Starting API server...");
+                run_server(config, db).await?;
                 return Ok(());
             }
         }
@@ -85,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_migrate_command(
     db: &DatabaseConnection,
     action: MigrateAction,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match action {
         MigrateAction::Up => {
             println!("Applying migrations...");
@@ -116,4 +135,64 @@ async fn handle_migrate_command(
         }
     }
     Ok(())
+}
+
+async fn handle_sync_executor_command(
+    config: connectors::config::AppConfig,
+    db: DatabaseConnection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("Starting sync executor service...");
+
+    // Run migrations automatically for local and test profiles
+    if config.profile == "local" || config.profile == "test" {
+        println!(
+            "Running migrations for sync executor (profile: {})",
+            config.profile
+        );
+        Migrator::up(&db, None).await?;
+        println!("Migrations completed successfully");
+    }
+
+    // Initialize the connector registry
+    Registry::initialize();
+    println!("Connector registry initialized");
+
+    // Log rate limit policy configuration
+    println!("Rate limit policy:");
+    println!("  Base seconds: {}", config.rate_limit_policy.base_seconds);
+    println!("  Max seconds: {}", config.rate_limit_policy.max_seconds);
+    println!(
+        "  Jitter factor: {}",
+        config.rate_limit_policy.jitter_factor
+    );
+    if !config.rate_limit_policy.provider_overrides.is_empty() {
+        println!("  Provider overrides:");
+        for (provider, override_config) in &config.rate_limit_policy.provider_overrides {
+            println!("    {}: {:?}", provider, override_config);
+        }
+    } else {
+        println!("  No provider overrides configured");
+    }
+
+    // Create executor configuration
+    let executor_config = ExecutorConfig::default();
+    println!("Executor configuration:");
+    println!("  Tick interval: {}ms", executor_config.tick_ms);
+    println!("  Concurrency: {}", executor_config.concurrency);
+    println!("  Claim batch: {}", executor_config.claim_batch);
+    println!("  Max run time: {}s", executor_config.max_run_seconds);
+    println!("  Max items per run: {}", executor_config.max_items_per_run);
+
+    // Create sync executor
+    let executor = connectors::sync_executor::SyncExecutor::new(
+        db,
+        Registry::global().read().unwrap().clone(),
+        executor_config,
+        config.rate_limit_policy,
+    );
+
+    println!("Sync executor started. Press Ctrl+C to stop.");
+
+    // Run the executor loop (this will block until interrupted)
+    executor.run().await
 }

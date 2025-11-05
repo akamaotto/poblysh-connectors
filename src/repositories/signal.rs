@@ -86,10 +86,10 @@ impl<'a> SignalRepository<'a> {
         // Apply cursor pagination
         if let Some(cursor) = cursor_data {
             query = query.filter(
-                sea_orm::Condition::all()
+                sea_orm::Condition::any()
                     .add(crate::models::signal::Column::OccurredAt.lt(cursor.occurred_at))
                     .add(
-                        sea_orm::Condition::any()
+                        sea_orm::Condition::all()
                             .add(crate::models::signal::Column::OccurredAt.eq(cursor.occurred_at))
                             .add(crate::models::signal::Column::Id.lt(cursor.id)),
                     ),

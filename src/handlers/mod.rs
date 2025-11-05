@@ -2,6 +2,7 @@
 //!
 //! This module contains all the HTTP endpoint handlers for the Connectors API.
 
+pub mod config;
 pub mod connect;
 pub mod connections;
 pub mod jobs;

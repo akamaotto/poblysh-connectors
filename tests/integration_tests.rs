@@ -300,8 +300,8 @@ mod signals_tests {
     #[tokio::test]
     async fn test_signals_endpoint_with_limit() {
         let (server_url, db) = start_test_server_with_db().await;
-        let (tenant_id, connection_id, _) = create_test_data(&db).await;
-        create_test_signals(&db, tenant_id, connection_id, 5).await;
+        let (tenant_id, connection_id, provider_slug) = create_test_data(&db).await;
+        create_test_signals(&db, tenant_id, connection_id, &provider_slug, 5).await;
 
         let client = Client::new();
         let tenant_id_str = tenant_id.to_string();
@@ -328,14 +328,14 @@ mod signals_tests {
     #[tokio::test]
     async fn test_signals_endpoint_with_provider_filter() {
         let (server_url, db) = start_test_server_with_db().await;
-        let (tenant_id, connection_id, _) = create_test_data(&db).await;
-        create_test_signals(&db, tenant_id, connection_id, 3).await;
+        let (tenant_id, connection_id, provider_slug) = create_test_data(&db).await;
+        create_test_signals(&db, tenant_id, connection_id, &provider_slug, 3).await;
 
         let client = Client::new();
         let tenant_id_str = tenant_id.to_string();
 
         let response = client
-            .get(format!("{}/signals?provider=test-provider", server_url))
+            .get(format!("{}/signals?provider={}", server_url, provider_slug))
             .header("Authorization", "Bearer test-token")
             .header("X-Tenant-Id", tenant_id_str)
             .send()
@@ -352,7 +352,7 @@ mod signals_tests {
         for signal in signals {
             assert_eq!(
                 signal.get("provider_slug").unwrap().as_str().unwrap(),
-                "test-provider"
+                provider_slug
             );
         }
     }
@@ -360,7 +360,7 @@ mod signals_tests {
     #[tokio::test]
     async fn test_signals_endpoint_with_kind_filter() {
         let (server_url, db) = start_test_server_with_db().await;
-        let (tenant_id, connection_id, _) = create_test_data(&db).await;
+        let (tenant_id, connection_id, provider_slug) = create_test_data(&db).await;
 
         // Create signals with different kinds
         let now = Utc::now();
@@ -368,7 +368,7 @@ mod signals_tests {
             let signal = SignalActiveModel {
                 id: sea_orm::Set(Uuid::new_v4()),
                 tenant_id: sea_orm::Set(tenant_id),
-                provider_slug: sea_orm::Set("test-provider".to_string()),
+                provider_slug: sea_orm::Set(provider_slug.clone()),
                 connection_id: sea_orm::Set(connection_id),
                 kind: sea_orm::Set(kind.to_string()),
                 occurred_at: sea_orm::Set(now.into()),
@@ -464,7 +464,7 @@ mod signals_tests {
     #[tokio::test]
     async fn test_signals_endpoint_with_time_filter() {
         let (server_url, db) = start_test_server_with_db().await;
-        let (tenant_id, connection_id, _) = create_test_data(&db).await;
+        let (tenant_id, connection_id, provider_slug) = create_test_data(&db).await;
 
         // Create signals at specific times
         let base_time = Utc::now();
@@ -475,7 +475,7 @@ mod signals_tests {
             let signal = SignalActiveModel {
                 id: sea_orm::Set(Uuid::new_v4()),
                 tenant_id: sea_orm::Set(tenant_id),
-                provider_slug: sea_orm::Set("test-provider".to_string()),
+                provider_slug: sea_orm::Set(provider_slug.clone()),
                 connection_id: sea_orm::Set(connection_id),
                 kind: sea_orm::Set(format!("timed_event_{}", i)),
                 occurred_at: sea_orm::Set((*time).into()),
@@ -522,14 +522,14 @@ mod signals_tests {
         let (server_url, db) = start_test_server_with_db().await;
 
         // Create two tenants with their own connections and signals
-        let (tenant1_id, connection1_id, _) = create_test_data(&db).await;
-        let (tenant2_id, connection2_id, _) = create_test_data(&db).await;
+        let (tenant1_id, connection1_id, provider_slug1) = create_test_data(&db).await;
+        let (tenant2_id, connection2_id, provider_slug2) = create_test_data(&db).await;
 
         // Create signals for tenant 1
-        create_test_signals(&db, tenant1_id, connection1_id, 2).await;
+        create_test_signals(&db, tenant1_id, connection1_id, &provider_slug1, 2).await;
 
         // Create signals for tenant 2
-        create_test_signals(&db, tenant2_id, connection2_id, 2).await;
+        create_test_signals(&db, tenant2_id, connection2_id, &provider_slug2, 2).await;
 
         let client = Client::new();
 
@@ -560,8 +560,8 @@ mod signals_tests {
     #[tokio::test]
     async fn test_signals_endpoint_pagination_flow() {
         let (server_url, db) = start_test_server_with_db().await;
-        let (tenant_id, connection_id, _) = create_test_data(&db).await;
-        create_test_signals(&db, tenant_id, connection_id, 5).await;
+        let (tenant_id, connection_id, provider_slug) = create_test_data(&db).await;
+        create_test_signals(&db, tenant_id, connection_id, &provider_slug, 5).await;
 
         let client = Client::new();
         let tenant_id_str = tenant_id.to_string();

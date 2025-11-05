@@ -9,6 +9,7 @@ pub mod connection;
 pub mod oauth_state;
 pub mod provider;
 pub mod signal;
+pub mod signal_without_payload;
 pub mod sync_job;
 pub mod tenant;
 

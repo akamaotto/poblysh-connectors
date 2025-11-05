@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, env, net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 /// Application configuration derived from `POBLYSH_*` environment variables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,8 @@ pub struct AppConfig {
     pub webhook_slack_tolerance_seconds: u64,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
+    #[serde(default)]
+    pub rate_limit_policy: RateLimitPolicyConfig,
 }
 
 /// Scheduler-specific configuration parameters.
@@ -56,6 +59,75 @@ pub struct SchedulerConfig {
     pub max_overridden_interval_seconds: u64,
 }
 
+/// Rate limit policy configuration for handling provider rate limits
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct RateLimitPolicyConfig {
+    /// Base retry interval in seconds (default: 5)
+    ///
+    /// The starting backoff time when a rate limit is encountered.
+    /// Subsequent retries use exponential backoff: base_seconds * 2^attempts.
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_BASE_SECONDS`
+    #[serde(default = "default_rate_limit_base_seconds")]
+    #[schema(example = 5)]
+    pub base_seconds: u64,
+
+    /// Maximum retry interval in seconds (default: 900)
+    ///
+    /// Upper bound for exponential backoff calculations to prevent
+    /// excessively long retry delays. Must be >= base_seconds.
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_MAX_SECONDS`
+    #[serde(default = "default_rate_limit_max_seconds")]
+    #[schema(example = 900)]
+    pub max_seconds: u64,
+
+    /// Jitter factor for distributed systems (default: 0.1, range: 0.0-1.0)
+    ///
+    /// Random factor applied to backoff calculations to prevent thundering
+    /// herd problems when multiple instances retry simultaneously.
+    /// Formula: backoff * (1 ± jitter_factor)
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_JITTER_FACTOR`
+    #[serde(default = "default_rate_limit_jitter_factor")]
+    #[schema(example = 0.1, minimum = 0.0, maximum = 1.0)]
+    pub jitter_factor: f64,
+
+    /// Provider-specific rate limit policy overrides
+    ///
+    /// Allows fine-tuning rate limits for specific providers that may have
+    /// different rate limit behaviors or requirements.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_overrides: BTreeMap<String, RateLimitProviderOverride>,
+}
+
+/// Provider-specific rate limit policy overrides
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct RateLimitProviderOverride {
+    /// Override for base retry interval for this provider
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_PROVIDER_OVERRIDE_{PROVIDER}_BASE_SECONDS`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 10)]
+    pub base_seconds: Option<u64>,
+
+    /// Override for maximum retry interval for this provider
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_PROVIDER_OVERRIDE_{PROVIDER}_MAX_SECONDS`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 1800)]
+    pub max_seconds: Option<u64>,
+
+    /// Override for jitter factor for this provider
+    ///
+    /// Environment variable: `POBLYSH_RATE_LIMIT_PROVIDER_OVERRIDE_{PROVIDER}_JITTER_FACTOR`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 0.2, minimum = 0.0, maximum = 1.0)]
+    pub jitter_factor: Option<f64>,
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -72,6 +144,7 @@ impl Default for AppConfig {
             webhook_slack_signing_secret: None,
             webhook_slack_tolerance_seconds: default_webhook_slack_tolerance_seconds(),
             scheduler: SchedulerConfig::default(),
+            rate_limit_policy: RateLimitPolicyConfig::default(),
         }
     }
 }
@@ -86,6 +159,118 @@ impl Default for SchedulerConfig {
             max_overridden_interval_seconds: default_sync_scheduler_max_overridden_interval_seconds(
             ),
         }
+    }
+}
+
+impl Default for RateLimitPolicyConfig {
+    fn default() -> Self {
+        Self {
+            base_seconds: default_rate_limit_base_seconds(),
+            max_seconds: default_rate_limit_max_seconds(),
+            jitter_factor: default_rate_limit_jitter_factor(),
+            provider_overrides: BTreeMap::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_rate_limit_policy_validation() {
+        // Test valid config
+        let valid_config = RateLimitPolicyConfig {
+            base_seconds: 5,
+            max_seconds: 900,
+            jitter_factor: 0.1,
+            provider_overrides: BTreeMap::new(),
+        };
+        assert!(valid_config.validate().is_ok());
+
+        // Test invalid bounds
+        let invalid_bounds = RateLimitPolicyConfig {
+            base_seconds: 1000,
+            max_seconds: 500,
+            jitter_factor: 0.1,
+            provider_overrides: BTreeMap::new(),
+        };
+        assert!(invalid_bounds.validate().is_err());
+
+        // Test invalid jitter
+        let invalid_jitter = RateLimitPolicyConfig {
+            base_seconds: 5,
+            max_seconds: 900,
+            jitter_factor: 1.5,
+            provider_overrides: BTreeMap::new(),
+        };
+        assert!(invalid_jitter.validate().is_err());
+    }
+
+    #[test]
+    fn test_provider_override_validation() {
+        let mut provider_overrides = BTreeMap::new();
+        provider_overrides.insert(
+            "github".to_string(),
+            RateLimitProviderOverride {
+                base_seconds: Some(100),
+                max_seconds: Some(50), // Invalid: base > max
+                jitter_factor: None,
+            },
+        );
+
+        let config = RateLimitPolicyConfig {
+            base_seconds: 5,
+            max_seconds: 900,
+            jitter_factor: 0.1,
+            provider_overrides,
+        };
+        assert!(config.validate().is_err());
+    }
+}
+
+impl RateLimitPolicyConfig {
+    /// Validate rate limit policy configuration bounds
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate base <= max
+        if self.base_seconds > self.max_seconds {
+            return Err(ConfigError::InvalidRateLimitBounds {
+                base: self.base_seconds,
+                max: self.max_seconds,
+            });
+        }
+
+        // Validate jitter factor bounds
+        if self.jitter_factor < 0.0 || self.jitter_factor > 1.0 {
+            return Err(ConfigError::InvalidRateLimitJitter {
+                value: self.jitter_factor,
+            });
+        }
+
+        // Validate provider overrides
+        for (provider, override_config) in &self.provider_overrides {
+            let base = override_config.base_seconds.unwrap_or(self.base_seconds);
+            let max = override_config.max_seconds.unwrap_or(self.max_seconds);
+            let jitter = override_config.jitter_factor.unwrap_or(self.jitter_factor);
+
+            if base > max {
+                return Err(ConfigError::InvalidRateLimitProviderBounds {
+                    provider: provider.clone(),
+                    base,
+                    max,
+                });
+            }
+
+            if jitter < 0.0 || jitter > 1.0 {
+                return Err(ConfigError::InvalidRateLimitProviderJitter {
+                    provider: provider.clone(),
+                    value: jitter,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -139,6 +324,9 @@ impl AppConfig {
 
         // Validate scheduler configuration
         self.scheduler.validate()?;
+
+        // Validate rate limit policy configuration
+        self.rate_limit_policy.validate()?;
 
         Ok(())
     }
@@ -196,6 +384,18 @@ fn default_sync_scheduler_max_overridden_interval_seconds() -> u64 {
     86400 // 24 hours
 }
 
+fn default_rate_limit_base_seconds() -> u64 {
+    5 // 5 seconds
+}
+
+fn default_rate_limit_max_seconds() -> u64 {
+    900 // 15 minutes
+}
+
+fn default_rate_limit_jitter_factor() -> f64 {
+    0.1 // 10% jitter
+}
+
 /// Errors that can occur while loading configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -233,6 +433,22 @@ pub enum ConfigError {
         "sync scheduler max overridden interval must be at least 300 seconds (5 minutes), got {value}"
     )]
     InvalidSchedulerMaxInterval { value: u64 },
+    #[error("rate limit base seconds ({base}) cannot be greater than max seconds ({max})")]
+    InvalidRateLimitBounds { base: u64, max: u64 },
+    #[error("rate limit jitter factor must be between 0.0 and 1.0, got {value}")]
+    InvalidRateLimitJitter { value: f64 },
+    #[error(
+        "provider {provider} rate limit base seconds ({base}) cannot be greater than max seconds ({max})"
+    )]
+    InvalidRateLimitProviderBounds {
+        provider: String,
+        base: u64,
+        max: u64,
+    },
+    #[error(
+        "provider {provider} rate limit jitter factor must be between 0.0 and 1.0, got {value}"
+    )]
+    InvalidRateLimitProviderJitter { provider: String, value: f64 },
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -353,12 +569,77 @@ impl ConfigLoader {
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_sync_scheduler_max_overridden_interval_seconds);
 
+        // Parse rate limit policy configuration
+        let rate_limit_base_seconds = layered
+            .remove("RATE_LIMIT_BASE_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_rate_limit_base_seconds);
+        let rate_limit_max_seconds = layered
+            .remove("RATE_LIMIT_MAX_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_rate_limit_max_seconds);
+        let rate_limit_jitter_factor = layered
+            .remove("RATE_LIMIT_JITTER_FACTOR")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_rate_limit_jitter_factor);
+
         let scheduler = SchedulerConfig {
             tick_interval_seconds: sync_scheduler_tick_interval_seconds,
             default_interval_seconds: sync_scheduler_default_interval_seconds,
             jitter_pct_min: sync_scheduler_jitter_pct_min,
             jitter_pct_max: sync_scheduler_jitter_pct_max,
             max_overridden_interval_seconds: sync_scheduler_max_overridden_interval_seconds,
+        };
+
+        // Parse provider-specific overrides
+        let mut provider_overrides = BTreeMap::new();
+
+        // Collect all provider override environment variables
+        for (key, value) in layered.clone() {
+            if let Some(provider_suffix) = key.strip_prefix("RATE_LIMIT_OVERRIDE_") {
+                // Expected format: RATE_LIMIT_OVERRIDE_<PROVIDER>_<SETTING>
+                let parts: Vec<&str> = provider_suffix.split('_').collect();
+                if parts.len() >= 2 {
+                    let provider_name = parts[0].to_lowercase();
+                    let setting_name = parts[1..].join("_");
+
+                    let override_entry = provider_overrides
+                        .entry(provider_name.clone())
+                        .or_insert_with(|| RateLimitProviderOverride {
+                            base_seconds: None,
+                            max_seconds: None,
+                            jitter_factor: None,
+                        });
+
+                    match setting_name.as_str() {
+                        "base_seconds" => {
+                            if let Ok(seconds) = value.parse::<u64>() {
+                                override_entry.base_seconds = Some(seconds);
+                            }
+                        }
+                        "max_seconds" => {
+                            if let Ok(seconds) = value.parse::<u64>() {
+                                override_entry.max_seconds = Some(seconds);
+                            }
+                        }
+                        "jitter_factor" => {
+                            if let Ok(factor) = value.parse::<f64>() {
+                                override_entry.jitter_factor = Some(factor);
+                            }
+                        }
+                        _ => {
+                            // Unknown setting, ignore
+                        }
+                    }
+                }
+            }
+        }
+
+        let rate_limit_policy = RateLimitPolicyConfig {
+            base_seconds: rate_limit_base_seconds,
+            max_seconds: rate_limit_max_seconds,
+            jitter_factor: rate_limit_jitter_factor,
+            provider_overrides,
         };
 
         let config = AppConfig {
@@ -379,6 +660,7 @@ impl ConfigLoader {
             webhook_slack_signing_secret,
             webhook_slack_tolerance_seconds,
             scheduler,
+            rate_limit_policy,
         };
 
         // Validate configuration

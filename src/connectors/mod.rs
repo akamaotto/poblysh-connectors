@@ -18,6 +18,6 @@ pub use jira::{JiraConnector, register_jira_connector};
 pub use metadata::{AuthType, ProviderMetadata};
 pub use registry::{Registry, RegistryError};
 pub use trait_::{
-    AuthorizeParams, Connector, ConnectorError, Cursor, ExchangeTokenParams, SyncParams,
-    SyncResult, WebhookParams,
+    AuthorizeParams, Connector, ConnectorError, Cursor, ExchangeTokenParams, SyncError,
+    SyncErrorKind, SyncParams, SyncResult, WebhookParams,
 };

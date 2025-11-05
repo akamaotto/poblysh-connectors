@@ -16,6 +16,20 @@ use crate::connectors::{
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
 
 /// Example stub connector
+///
+/// # Error Handling
+///
+/// This connector demonstrates the recommended error handling patterns:
+///
+/// - **ConnectorError::RateLimitError**: Automatically converted to SyncError::rate_limited()
+///   by the sync executor, enabling proper exponential backoff with jitter
+/// - **ConnectorError::AuthenticationError**: Converted to SyncError::unauthorized()
+/// - **ConnectorError::NetworkError**: Converted to SyncError::transient() for retryable issues
+/// - **ConnectorError::HttpError**: Converted based on status code (4xx → permanent, 5xx → transient)
+/// - **ConnectorError::MalformedResponse**: Converted to SyncError::permanent()
+///
+/// The automatic conversion happens via the `From<ConnectorError> for SyncError` implementation,
+/// so connector implementations only need to return the appropriate `ConnectorError` variants.
 pub struct ExampleConnector;
 
 #[async_trait]
@@ -79,6 +93,9 @@ impl Connector for ExampleConnector {
                 .into());
             }
             "test_rate_limit" => {
+                // Note: This ConnectorError::RateLimitError will be automatically
+                // converted to SyncError::rate_limited() by the From trait implementation
+                // in the sync executor, enabling proper rate limiting behavior.
                 return Err(ConnectorError::RateLimitError {
                     retry_after: Some(3600),
                     limit: Some(100),

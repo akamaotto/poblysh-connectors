@@ -40,6 +40,83 @@ pub enum ConnectorError {
     Unknown { details: String },
 }
 
+/// Sync-specific error types for structured error handling during sync operations
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SyncError {
+    #[serde(flatten)]
+    pub kind: SyncErrorKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SyncErrorKind {
+    /// Authentication/authorization failure
+    Unauthorized,
+    /// Rate limited with optional retry after hint
+    RateLimited {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retry_after_secs: Option<u64>,
+    },
+    /// Transient/retryable error
+    Transient,
+    /// Permanent/non-retryable error
+    Permanent,
+}
+
+impl SyncError {
+    pub fn unauthorized<S: Into<String>>(message: S) -> Self {
+        Self {
+            kind: SyncErrorKind::Unauthorized,
+            message: Some(message.into()),
+            details: None,
+        }
+    }
+
+    pub fn rate_limited(retry_after_secs: Option<u64>) -> Self {
+        Self {
+            kind: SyncErrorKind::RateLimited { retry_after_secs },
+            message: None,
+            details: None,
+        }
+    }
+
+    pub fn rate_limited_with_message<S: Into<String>>(
+        retry_after_secs: Option<u64>,
+        message: S,
+    ) -> Self {
+        Self {
+            kind: SyncErrorKind::RateLimited { retry_after_secs },
+            message: Some(message.into()),
+            details: None,
+        }
+    }
+
+    pub fn transient<S: Into<String>>(message: S) -> Self {
+        Self {
+            kind: SyncErrorKind::Transient,
+            message: Some(message.into()),
+            details: None,
+        }
+    }
+
+    pub fn permanent<S: Into<String>>(message: S) -> Self {
+        Self {
+            kind: SyncErrorKind::Permanent,
+            message: Some(message.into()),
+            details: None,
+        }
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+}
+
 impl std::fmt::Display for ConnectorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -83,6 +160,102 @@ impl std::fmt::Display for ConnectorError {
 }
 
 impl std::error::Error for ConnectorError {}
+
+impl std::fmt::Display for SyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            SyncErrorKind::Unauthorized => {
+                write!(f, "Unauthorized")?;
+                if let Some(msg) = &self.message {
+                    write!(f, ": {}", msg)?;
+                }
+            }
+            SyncErrorKind::RateLimited { retry_after_secs } => {
+                write!(f, "Rate limited")?;
+                if let Some(after) = retry_after_secs {
+                    write!(f, " (retry after: {}s)", after)?;
+                }
+                if let Some(msg) = &self.message {
+                    write!(f, ": {}", msg)?;
+                }
+            }
+            SyncErrorKind::Transient => {
+                write!(f, "Transient error")?;
+                if let Some(msg) = &self.message {
+                    write!(f, ": {}", msg)?;
+                }
+            }
+            SyncErrorKind::Permanent => {
+                write!(f, "Permanent error")?;
+                if let Some(msg) = &self.message {
+                    write!(f, ": {}", msg)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for SyncError {}
+
+impl From<ConnectorError> for SyncError {
+    fn from(connector_error: ConnectorError) -> Self {
+        match connector_error {
+            ConnectorError::RateLimitError {
+                retry_after,
+                limit: _,
+            } => SyncError::rate_limited(retry_after),
+            ConnectorError::AuthenticationError {
+                details,
+                error_code: _,
+            } => SyncError::unauthorized(details),
+            ConnectorError::NetworkError { details, retryable } => {
+                if retryable {
+                    SyncError::transient(details)
+                } else {
+                    SyncError::permanent(details)
+                }
+            }
+            ConnectorError::HttpError {
+                status,
+                body,
+                headers: _,
+            } => {
+                if status == 429 {
+                    // Try to extract retry_after from body if available
+                    let retry_after = body
+                        .as_ref()
+                        .and_then(|b| b.strip_prefix("Retry-After: "))
+                        .and_then(|s| s.split_whitespace().next())
+                        .and_then(|s| s.parse().ok());
+                    SyncError::rate_limited(retry_after)
+                } else if status >= 400 && status < 500 {
+                    SyncError::permanent(format!(
+                        "HTTP error {}: {}",
+                        status,
+                        body.unwrap_or_default()
+                    ))
+                } else {
+                    SyncError::transient(format!(
+                        "HTTP error {}: {}",
+                        status,
+                        body.unwrap_or_default()
+                    ))
+                }
+            }
+            ConnectorError::MalformedResponse {
+                details,
+                partial_data: _,
+            } => SyncError::transient(format!("Malformed response: {}", details)),
+            ConnectorError::ConfigurationError { details } => {
+                SyncError::permanent(format!("Configuration error: {}", details))
+            }
+            ConnectorError::Unknown { details } => {
+                SyncError::transient(format!("Unknown error: {}", details))
+            }
+        }
+    }
+}
 
 /// Cursor for pagination in sync operations.
 ///
