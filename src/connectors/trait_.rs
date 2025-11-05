@@ -8,10 +8,122 @@ use uuid::Uuid;
 
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
 
-/// Cursor for pagination in sync operations
+/// Connector-specific error types for structured error handling
 #[derive(Debug, Clone)]
-pub struct Cursor {
-    pub value: String,
+pub enum ConnectorError {
+    /// HTTP error from upstream provider
+    HttpError {
+        status: u16,
+        body: Option<String>,
+        headers: Vec<(String, String)>,
+    },
+    /// Malformed response from provider
+    MalformedResponse {
+        details: String,
+        partial_data: Option<String>,
+    },
+    /// Network or connectivity error
+    NetworkError { details: String, retryable: bool },
+    /// Authentication/authorization error
+    AuthenticationError {
+        details: String,
+        error_code: Option<String>,
+    },
+    /// Rate limiting error
+    RateLimitError {
+        retry_after: Option<u64>,
+        limit: Option<u32>,
+    },
+    /// Configuration or setup error
+    ConfigurationError { details: String },
+    /// Unknown error
+    Unknown { details: String },
+}
+
+impl std::fmt::Display for ConnectorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectorError::HttpError { status, body, .. } => {
+                write!(
+                    f,
+                    "HTTP error {}: {}",
+                    status,
+                    body.as_deref().unwrap_or("No body")
+                )
+            }
+            ConnectorError::MalformedResponse { details, .. } => {
+                write!(f, "Malformed response: {}", details)
+            }
+            ConnectorError::NetworkError { details, .. } => {
+                write!(f, "Network error: {}", details)
+            }
+            ConnectorError::AuthenticationError { details, .. } => {
+                write!(f, "Authentication error: {}", details)
+            }
+            ConnectorError::RateLimitError {
+                retry_after, limit, ..
+            } => {
+                write!(f, "Rate limit exceeded")?;
+                if let Some(limit) = limit {
+                    write!(f, " (limit: {})", limit)?;
+                }
+                if let Some(after) = retry_after {
+                    write!(f, " (retry after: {}s)", after)?;
+                }
+                Ok(())
+            }
+            ConnectorError::ConfigurationError { details } => {
+                write!(f, "Configuration error: {}", details)
+            }
+            ConnectorError::Unknown { details } => {
+                write!(f, "Unknown error: {}", details)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectorError {}
+
+/// Cursor for pagination in sync operations.
+///
+/// Wraps an opaque JSON payload returned by connectors. The payload may be a
+/// primitive or structured object and must round-trip without alteration.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(transparent)]
+pub struct Cursor(pub serde_json::Value);
+
+impl Cursor {
+    /// Construct a cursor from any JSON value.
+    pub fn from_json(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+
+    /// Convenience helper to build a string cursor.
+    pub fn from_string<S: Into<String>>(value: S) -> Self {
+        Self(serde_json::Value::String(value.into()))
+    }
+
+    /// Borrow the underlying JSON value.
+    pub fn as_json(&self) -> &serde_json::Value {
+        &self.0
+    }
+
+    /// Attempt to access the cursor as a string.
+    pub fn as_str(&self) -> Option<&str> {
+        self.0.as_str()
+    }
+}
+
+impl From<Cursor> for serde_json::Value {
+    fn from(cursor: Cursor) -> Self {
+        cursor.0
+    }
+}
+
+impl From<serde_json::Value> for Cursor {
+    fn from(value: serde_json::Value) -> Self {
+        Cursor::from_json(value)
+    }
 }
 
 /// Parameters for authorization flow
@@ -35,6 +147,14 @@ pub struct ExchangeTokenParams {
 pub struct SyncParams {
     pub connection: Connection,
     pub cursor: Option<Cursor>,
+}
+
+/// Result from a sync operation
+#[derive(Debug, Clone)]
+pub struct SyncResult {
+    pub signals: Vec<Signal>,
+    pub next_cursor: Option<Cursor>,
+    pub has_more: bool,
 }
 
 /// Parameters for webhook handling
@@ -66,11 +186,11 @@ pub trait Connector: Send + Sync {
     ) -> Result<Connection, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Perform a sync operation for this provider.
-    /// Returns a collection of signals from the provider.
+    /// Returns signals and pagination information from the provider.
     async fn sync(
         &self,
         params: SyncParams,
-    ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Handle an incoming webhook from this provider.
     /// Returns a collection of signals generated from the webhook.

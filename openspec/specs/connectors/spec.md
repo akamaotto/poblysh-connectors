@@ -4,11 +4,18 @@
 TBD - created by archiving change add-connector-trait-and-registry. Update Purpose after archive.
 ## Requirements
 ### Requirement: Connector Trait
-The system SHALL define a `Connector` trait encapsulating provider lifecycle operations.
+The `sync` method signature and semantics SHALL support cursor advancement and pagination.
 
-#### Scenario: Trait methods are defined
-- **WHEN** implementing a provider adapter
-- **THEN** the trait includes methods `authorize(tenant) -> Url`, `exchange_token(code) -> Connection`, `refresh_token(connection)`, `sync(connection, cursor?) -> [Signal]`, and `handle_webhook(payload) -> [Signal]`
+#### Scenario: Sync returns next cursor and has_more
+- **WHEN** `sync(connection, cursor?)` is invoked
+- **THEN** it returns a `SyncResult` object with fields:
+  - `signals: [Signal]` (normalized events)
+  - `next_cursor?: Cursor` (opaque provider cursor for the next call)
+  - `has_more: bool` (true if additional pages remain)
+
+#### Scenario: Cursor is opaque and serializable
+- **WHEN** `next_cursor` is provided
+- **THEN** it is an opaque value serializable to JSON and safe to store under `connections.metadata.sync.cursor`
 
 ### Requirement: Provider Metadata Structure
 The system SHALL define a provider metadata structure for discovery and documentation.

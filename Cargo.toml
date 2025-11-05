@@ -37,6 +37,8 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 tracing-log = "0.2.0"
 tower-http = { version = "0.6.2", features = ["trace"] }
+metrics = "0.23.0"
+tokio-util = "0.7.17"
 url = { version = "2.5.4", features = ["serde"] }
 subtle = "2.6.1"
 tower = "0.5.1"
@@ -47,6 +49,9 @@ aes-gcm = "0.10.3"
 zeroize = { version = "1.8.1", features = ["zeroize_derive"] }
 base64-url = "3.0.0"
 regex = "1.11.1"
+hmac = "0.12.1"
+sha2 = "0.10.8"
+hex = "0.4.3"
 
 [dev-dependencies]
 reqwest = { version = "0.12.9", features = ["json"] }

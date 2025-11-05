@@ -11,10 +11,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tracing::{debug, error, info};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::auth::{OperatorAuth, TenantExtension};
+use crate::auth::{OperatorAuth, TenantExtension, TenantId};
 use crate::error::ApiError;
 use crate::handlers::TenantHeader;
 use crate::repositories::{ConnectionRepository, ProviderRepository, SyncJobRepository};
@@ -25,6 +25,17 @@ use crate::server::AppState;
 pub struct ProviderPath {
     /// Provider slug (e.g., "github", "jira")
     pub provider: String,
+}
+
+/// Path parameter for provider slug and tenant ID (public webhook routes)
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct ProviderTenantPath {
+    /// Provider slug (e.g., "github", "jira")
+    #[param(min_length = 1, example = "github")]
+    pub provider: String,
+    /// Tenant UUID for scoping the webhook
+    #[param(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub tenant_id: String, // Using String to avoid ToSchema issues with Uuid
 }
 
 /// Optional connection ID header for targeting specific connections
@@ -48,6 +59,30 @@ pub struct ProviderPathParam {
     /// Provider slug (e.g., "github", "jira")
     #[param(min_length = 1, example = "github")]
     pub provider: String,
+}
+
+/// GitHub signature header for webhook verification
+#[derive(Debug, Serialize, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Header)]
+pub struct GitHubSignatureHeader {
+    /// HMAC-SHA256 signature of the request body (hex string with sha256= prefix)
+    #[serde(rename = "X-Hub-Signature-256")]
+    #[param(rename = "X-Hub-Signature-256", value_type = String)]
+    pub signature: String,
+}
+
+/// Slack signature headers for webhook verification
+#[derive(Debug, Serialize, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Header)]
+pub struct SlackSignatureHeaders {
+    /// HMAC-SHA256 signature of the request body (hex string with v0= prefix)
+    #[serde(rename = "X-Slack-Signature")]
+    #[param(rename = "X-Slack-Signature", value_type = String)]
+    pub signature: String,
+    /// Unix timestamp of when the request was generated
+    #[serde(rename = "X-Slack-Request-Timestamp")]
+    #[param(rename = "X-Slack-Request-Timestamp", value_type = String)]
+    pub timestamp: String,
 }
 
 /// Helper function to extract optional connection ID from headers
@@ -276,6 +311,201 @@ pub async fn ingest_webhook(
             tenant_id = %tenant_id,
             provider_slug = %provider_slug,
             "Webhook accepted without connection targeting"
+        );
+    }
+
+    let response = WebhookAcceptResponse {
+        status: "accepted".to_string(),
+    };
+
+    Ok((StatusCode::ACCEPTED, Json(response)))
+}
+
+/// Accept webhook from external provider via public route with signature verification
+///
+/// This endpoint receives webhook callbacks from external providers without requiring
+/// operator authentication when a valid provider signature is present. The tenant_id
+/// is provided in the URL path to convey tenant context.
+#[utoipa::path(
+    post,
+    path = "/webhooks/{provider}/{tenant_id}",
+    params(
+        ("X-Connection-Id" = Option<String>, Header, description = "Optional connection ID to target"),
+        ("X-Hub-Signature-256" = Option<String>, Header, description = "GitHub HMAC-SHA256 signature (required for GitHub webhooks)"),
+        ("X-Slack-Signature" = Option<String>, Header, description = "Slack HMAC-SHA256 signature (required for Slack webhooks)"),
+        ("X-Slack-Request-Timestamp" = Option<String>, Header, description = "Slack request timestamp (required for Slack webhooks)"),
+        ProviderTenantPath
+    ),
+    request_body(content = Option<JsonValue>, description = "Webhook payload (opaque to API)", content_type = "application/json"),
+    responses(
+        (status = 202, description = "Webhook accepted with valid signature", body = WebhookAcceptResponse),
+        (status = 400, description = "Invalid connection ID header", body = ApiError),
+        (status = 401, description = "Missing or invalid webhook signature", body = ApiError),
+        (status = 404, description = "Provider not found or connection not found for tenant/provider", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    ),
+    tag = "webhooks"
+)]
+pub async fn ingest_public_webhook(
+    State(state): State<AppState>,
+    Path(path_params): Path<ProviderTenantPath>,
+    req: Request,
+) -> Result<(StatusCode, Json<WebhookAcceptResponse>), ApiError> {
+    let provider_slug = path_params.provider;
+    let tenant_uuid = path_params.tenant_id.parse::<Uuid>().map_err(|_| {
+        ApiError::new(
+            axum::http::StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "Invalid tenant ID format - must be a valid UUID",
+        )
+    })?;
+    let tenant_id = TenantId(tenant_uuid);
+
+    debug!(
+        provider_slug = %provider_slug,
+        tenant_id = %tenant_id.0,
+        "Processing public webhook ingestion with verified signature"
+    );
+
+    // Extract headers before consuming the request
+    let headers = req.headers().clone();
+
+    // Filter out sensitive headers before persisting in job cursor
+    let sensitive_headers = std::collections::HashSet::from([
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "proxy-authorization",
+        "www-authenticate",
+        "authentication-info",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "x-hub-signature-256", // Remove signature headers from persisted data
+        "x-slack-signature",
+        "x-slack-request-timestamp",
+    ]);
+
+    let webhook_headers: std::collections::HashMap<String, String> = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name_lower = name.as_str().to_lowercase();
+            // Skip sensitive headers and signature headers
+            if sensitive_headers.contains(&name_lower.as_str()) {
+                tracing::debug!("Filtering sensitive/signature header: {}", name_lower);
+                return None;
+            }
+
+            Some((
+                name_lower, // Canonical lower-case headers
+                value.to_str().unwrap_or("").to_string(),
+            ))
+        })
+        .collect();
+
+    // Validate provider exists
+    let provider_repo = ProviderRepository::new(std::sync::Arc::new(state.db.clone()));
+    let _provider = provider_repo
+        .find_by_slug(&provider_slug)
+        .await
+        .map_err(|e| {
+            error!(error = ?e, "Failed to lookup provider");
+            ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                "Failed to validate provider",
+            )
+        })?
+        .ok_or_else(|| {
+            info!(provider_slug = %provider_slug, "Provider not found");
+            ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "NOT_FOUND",
+                &format!("provider '{}' not found", provider_slug),
+            )
+        })?;
+
+    // Extract connection ID from headers
+    let connection_id = extract_connection_id(req.headers())?;
+
+    // Extract webhook body
+    let body = extract_webhook_body(req).await?;
+
+    // If connection ID is provided, validate it belongs to tenant and provider
+    if let Some(conn_id) = connection_id {
+        let connection_repo = ConnectionRepository::new(
+            std::sync::Arc::new(state.db.clone()),
+            state.crypto_key.clone(),
+        );
+        let _connection = connection_repo
+            .find_by_tenant_and_provider(&tenant_id.0, &provider_slug)
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Failed to validate connection");
+                ApiError::new(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_SERVER_ERROR",
+                    "Failed to validate connection",
+                )
+            })?
+            .into_iter()
+            .find(|conn| conn.id == conn_id)
+            .ok_or_else(|| {
+                error!(
+                    tenant_id = %tenant_id.0,
+                    provider_slug = %provider_slug,
+                    connection_id = %conn_id,
+                    "Connection not found for tenant/provider"
+                );
+                ApiError::new(
+                    axum::http::StatusCode::NOT_FOUND,
+                    "NOT_FOUND",
+                    "connection not found for tenant/provider",
+                )
+            })?;
+
+        info!(
+            tenant_id = %tenant_id.0,
+            provider_slug = %provider_slug,
+            connection_id = %conn_id,
+            "Valid connection found, enqueuing public webhook sync job"
+        );
+
+        // Create cursor with webhook context including headers and payload
+        // body is Option<JsonValue> from the helper function
+        let cursor = Some(serde_json::json!({
+            "webhook_headers": webhook_headers,
+            "webhook_payload": body,
+            "received_at": chrono::Utc::now().to_rfc3339(),
+            "verification_method": "signature"
+        }));
+
+        // Enqueue webhook sync job
+        let sync_job_repo = SyncJobRepository::new(state.db.clone());
+        sync_job_repo
+            .enqueue_webhook_job(tenant_id.0, &provider_slug, conn_id, cursor)
+            .await
+            .map_err(|e| {
+                error!(error = ?e, "Failed to enqueue webhook sync job");
+                ApiError::new(
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_SERVER_ERROR",
+                    "Failed to enqueue webhook job",
+                )
+            })?;
+
+        info!(
+            tenant_id = %tenant_id.0,
+            provider_slug = %provider_slug,
+            connection_id = %conn_id,
+            "Public webhook sync job enqueued successfully"
+        );
+    } else {
+        info!(
+            tenant_id = %tenant_id.0,
+            provider_slug = %provider_slug,
+            "Public webhook accepted without connection targeting"
         );
     }
 

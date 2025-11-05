@@ -10,8 +10,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::connectors::{
-    AuthType, Connector, ProviderMetadata, Registry,
-    trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, WebhookParams},
+    AuthType, Connector, ConnectorError, ProviderMetadata, Registry,
+    trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
 
@@ -47,6 +47,49 @@ impl Connector for ExampleConnector {
         &self,
         params: ExchangeTokenParams,
     ) -> Result<Connection, Box<dyn std::error::Error + Send + Sync>> {
+        // For testing error handling, return structured errors for specific test codes
+        match params.code.as_str() {
+            "test_http_error" => {
+                return Err(ConnectorError::HttpError {
+                    status: 500,
+                    body: Some("Internal Server Error".to_string()),
+                    headers: vec![("content-type".to_string(), "application/json".to_string())],
+                }
+                .into());
+            }
+            "test_malformed_response" => {
+                return Err(ConnectorError::MalformedResponse {
+                    details: "Invalid JSON response".to_string(),
+                    partial_data: Some("{\"invalid\": json}".to_string()),
+                }
+                .into());
+            }
+            "test_network_error" => {
+                return Err(ConnectorError::NetworkError {
+                    details: "Connection timeout".to_string(),
+                    retryable: true,
+                }
+                .into());
+            }
+            "test_auth_error" => {
+                return Err(ConnectorError::AuthenticationError {
+                    details: "Invalid client credentials".to_string(),
+                    error_code: Some("invalid_client".to_string()),
+                }
+                .into());
+            }
+            "test_rate_limit" => {
+                return Err(ConnectorError::RateLimitError {
+                    retry_after: Some(3600),
+                    limit: Some(100),
+                }
+                .into());
+            }
+            _ => {
+                // For other codes, including "test_authorization_code", return success
+            }
+        }
+
         // Stub implementation - return mock connection
         let now = DateTime::from(Utc::now());
         Ok(Connection {
@@ -92,25 +135,29 @@ impl Connector for ExampleConnector {
     async fn sync(
         &self,
         _params: SyncParams,
-    ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>> {
-        // Stub implementation - return mock signals
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Stub implementation - return mock signals and pagination info
         let now = DateTime::from(Utc::now());
-        Ok(vec![Signal {
-            id: Uuid::new_v4(),
-            tenant_id: Uuid::new_v4(),
-            provider_slug: "example".to_string(),
-            connection_id: Uuid::new_v4(),
-            kind: "example_event".to_string(),
-            occurred_at: now,
-            received_at: now,
-            payload: serde_json::json!({
-                "type": "example",
-                "message": "Mock signal from example connector"
-            }),
-            dedupe_key: Some("example_signal_1".to_string()),
-            created_at: now,
-            updated_at: now,
-        }])
+        Ok(SyncResult {
+            signals: vec![Signal {
+                id: Uuid::new_v4(),
+                tenant_id: Uuid::new_v4(),
+                provider_slug: "example".to_string(),
+                connection_id: Uuid::new_v4(),
+                kind: "example_event".to_string(),
+                occurred_at: now,
+                received_at: now,
+                payload: serde_json::json!({
+                    "type": "example",
+                    "message": "Mock signal from example connector"
+                }),
+                dedupe_key: Some("example_signal_1".to_string()),
+                created_at: now,
+                updated_at: now,
+            }],
+            next_cursor: None, // No more pages in this stub implementation
+            has_more: false,
+        })
     }
 
     async fn handle_webhook(

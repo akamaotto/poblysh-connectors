@@ -13,6 +13,7 @@ pub mod provider_connection_integration_tests;
 pub mod provider_repository_tests;
 #[allow(clippy::duplicate_mod)]
 pub mod provider_seeding_tests;
+
 #[allow(clippy::duplicate_mod)]
 pub mod tenant_isolation_tests;
 

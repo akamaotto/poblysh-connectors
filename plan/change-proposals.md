@@ -29,6 +29,7 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 21) add-signals-endpoint — `GET /signals` with filters + cursor pagination.
 22) add-rate-limit-policy — Central backoff + retry-after semantics.
 23) add-token-refresh-background — Hourly refresher + on-demand on 401.
+
 24) add-github-connector — OAuth app install, webhook events, REST backfill.
 25) add-jira-connector — OAuth, webhook filters, incremental sync.
 26) add-google-drive-connector — Watch channels + poll fallback.
@@ -36,11 +37,13 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 28) add-gmail-connector — Pub/Sub push ingest, ack + fetch.
 29) add-zoho-cliq-connector — Webhook ingest, message signals.
 30) add-zoho-mail-connector — Polling + dedupe window.
+
 31) update-api-pagination-and-cursors — Stable ordering, `next_cursor`.
 32) add-normalization-fixtures — Golden tests for `Signal.kind` mapping.
 33) add-local-run-scripts — Makefile/justfile tasks (no Docker).
 34) add-e2e-smoke-tests-local — Boot API, hit core endpoints against local DB.
 35) docs-polish-and-runbooks-local — Update PRD/Tech Spec/API; local crypto rotation runbook.
+
 36) add-dockerization-post-mvp — Containerize service and Postgres for deployment prep.
 
 Note: Dockerization is intentionally scheduled late (post-MVP) per project preference.

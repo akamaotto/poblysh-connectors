@@ -242,6 +242,54 @@ impl From<JsonRejection> for ApiError {
     }
 }
 
+impl From<crate::webhook_verification::VerificationError> for ApiError {
+    fn from(error: crate::webhook_verification::VerificationError) -> Self {
+        use crate::webhook_verification::VerificationError;
+
+        let message = match &error {
+            VerificationError::MissingSignature { header } => {
+                format!("Missing required signature header: {}", header)
+            }
+            VerificationError::InvalidSignatureFormat { header } => {
+                format!("Invalid signature format: {}", header)
+            }
+            VerificationError::VerificationFailed => "Signature verification failed".to_string(),
+            VerificationError::MissingTimestamp { header } => {
+                format!("Missing required timestamp header: {}", header)
+            }
+            VerificationError::InvalidTimestamp { header } => {
+                format!("Invalid timestamp format: {}", header)
+            }
+            VerificationError::TimestampTooOld {
+                seconds,
+                max_seconds,
+            } => {
+                format!("Timestamp too old: {}s (max: {}s)", seconds, max_seconds)
+            }
+            VerificationError::TimestampTooFuture {
+                seconds,
+                max_seconds,
+            } => {
+                format!(
+                    "Timestamp too far in future: {}s (max: {}s)",
+                    seconds, max_seconds
+                )
+            }
+            VerificationError::UnsupportedProvider { provider } => {
+                format!("Unsupported provider: {}", provider)
+            }
+            VerificationError::NotConfigured { provider } => {
+                format!(
+                    "Webhook verification not configured for provider: {}",
+                    provider
+                )
+            }
+        };
+
+        Self::new(error.status_code(), "WEBHOOK_VERIFICATION_FAILED", &message)
+    }
+}
+
 impl From<sea_orm::DbErr> for ApiError {
     fn from(error: sea_orm::DbErr) -> Self {
         if is_unique_violation(&error) {

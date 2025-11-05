@@ -7,8 +7,10 @@ pub mod connection;
 pub mod oauth_state;
 pub mod provider;
 pub mod sync_job;
+pub mod sync_metadata;
 
 pub use connection::ConnectionRepository;
 pub use oauth_state::OAuthStateRepository;
 pub use provider::ProviderRepository;
 pub use sync_job::SyncJobRepository;
+pub use sync_metadata::{ConnectionSyncMetadata, MIN_SYNC_INTERVAL_SECONDS};

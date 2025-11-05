@@ -1,9 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Unified Error Envelope
+
 The API SHALL return errors using a single JSON envelope with media type `application/problem+json`.
 
 Shape (MVP):
+
 - `code` (string, machine‑readable; e.g., `VALIDATION_FAILED`, `UNAUTHORIZED`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `PROVIDER_ERROR`, `INTERNAL_SERVER_ERROR`)
 - `message` (string, human‑readable debug message; safe to show to operators)
 - `details` (object, optional; key‑value metadata like field errors)
@@ -52,12 +54,90 @@ Mappings (MVP):
 - THEN the API responds with HTTP 502 `{ code: "PROVIDER_ERROR", details: { provider: "github", status: 503 } }`
 
 ### Requirement: OpenAPI Error Schema
+
 The error model SHALL be documented in OpenAPI and referenced by endpoints so clients can rely on the shape.
 
 #### Scenario: Schema present in OpenAPI
-- WHEN fetching `/openapi.json`
-- THEN a schema for `ApiError` exists
-- AND endpoints declare `ApiError` for non‑2xx responses where applicable
+- **WHEN** fetching `/openapi.json`
+- **THEN** a schema for `ApiError` exists
+- **AND** endpoints declare `ApiError` for non‑2xx responses where applicable
+
+#### ApiError Schema Definition
+
+- Declare `components.schemas.ApiError` as an object with machine-readable envelope fields.
+- Required properties: `code` (string) and `message` (string).
+- Optional properties: `status` (integer HTTP status), `detail` (string), `timestamp` (string, date-time), `trace_id` (string), `errors` (array of objects for field-level issues), and `extensions` (object for vendor-specific metadata).
+- Additional optional properties MAY be included provided they remain JSON-serializable and backwards compatible.
+
+Example schema definition:
+
+```yaml
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error identifier.
+        message:
+          type: string
+          description: Human-readable summary suitable for operators.
+        status:
+          type: integer
+          format: int32
+          description: HTTP status associated with the problem.
+        detail:
+          type: string
+          description: Additional context or remediation guidance.
+        timestamp:
+          type: string
+          format: date-time
+          description: Moment the error was produced.
+        trace_id:
+          type: string
+          description: Correlation identifier for tracing.
+        errors:
+          type: array
+          description: Structured validation issues keyed by field.
+          items:
+            type: object
+        extensions:
+          type: object
+          additionalProperties: true
+          description: Vendor-specific fields following RFC 7807 extension guidance.
+```
+
+#### Details Constraints
+
+- Follow RFC 7807 and RFC 9457 guidance: `detail` (and entries inside `details`) SHOULD help clients remediate the issue without exposing implementation internals or sensitive data.
+- Use standardized top-level keys for recurring categories:
+  - Validation failures: `details` contains dot-notated field paths mapping to machine-readable error codes, e.g., `{ "user.email": "INVALID_FORMAT" }`.
+  - Provider errors: nest provider context under `provider`, e.g., `{ "provider": { "name": "github", "status": 503, "error_code": "UPSTREAM_TIMEOUT" } }`.
+- Permit additional error-specific keys when necessary, but keep naming lowercase with dot separators for hierarchical data.
+- Mark `details` as operator-visible: responses MAY return `details` to API consumers only when the information is safe for public clients; otherwise, include it in logs with `trace_id` linkage and omit sensitive fields from the public response.
+- Never include secrets, stack traces, database identifiers, or internal hostnames. Error payloads MUST contain only data the caller is authorized to view.
+- Provide high-level guidance strings in `detail` while keeping verbose diagnostics in server logs to minimize information leakage and satisfy least-privilege principles.
+
+#### Reference Pattern
+
+Endpoints SHOULD reference the shared schema for each non-2xx response:
+
+```yaml
+paths:
+  /example:
+    get:
+      responses:
+        "400":
+          description: Bad Request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+```
 
 ### Requirement: Correlation ID Propagation
 Error responses SHALL include a `trace_id` correlating with structured logs for the same request.

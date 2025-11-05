@@ -17,6 +17,7 @@ Perform reviews like a senior engineer who understands the entire codebase—not
 - **Context Awareness**: Always consider the broader codebase implications, not just the immediate changes.
 - **Learning Orientation**: Make reviews educational—explain *why* something is an issue, not just *what* is wrong.
 - **Reference Documentation**: Refer to `openspec/AGENTS.md` for OpenSpec conventions and clarifications.
+- **Axum Skill Pack**: If the change touches Axum 0.8 routing, middleware, or extractors, consult `.claude/skills/axum-0-8/SKILL.md` for framework patterns and pitfalls.
 
 ---
 

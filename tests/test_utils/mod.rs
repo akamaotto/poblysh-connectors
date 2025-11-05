@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseConnection, EntityTrait, Statement};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -111,4 +111,184 @@ pub async fn insert_connection(
     );
     db.execute(stmt).await?;
     Ok(())
+}
+
+/// Creates a test connection model for testing.
+pub async fn create_test_connection() -> Result<connectors::models::connection::Model> {
+    let db = setup_test_db().await?;
+    let tenant_id = create_test_tenant(&db, None).await?;
+    let connection_id = Uuid::new_v4();
+    insert_provider(&db, "test", "Test Provider", "oauth2").await?;
+    insert_connection(&db, connection_id, tenant_id, "test", "test-external-id").await?;
+
+    let connection = connectors::models::connection::Entity::find_by_id(connection_id)
+        .one(&db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to find created connection"))?;
+
+    Ok(connection)
+}
+
+/// Creates a test connection with specific ID for testing.
+pub async fn create_test_connection_with_id(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    connection_id: Uuid,
+) -> Result<connectors::models::connection::Model> {
+    insert_provider(db, "test", "Test Provider", "oauth2").await?;
+    insert_connection(db, connection_id, tenant_id, "test", "test-external-id").await?;
+
+    let connection = connectors::models::connection::Entity::find_by_id(connection_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to find created connection"))?;
+
+    Ok(connection)
+}
+
+/// Creates a test connection with specific provider for testing.
+pub async fn create_test_connection_with_provider(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    connection_id: Uuid,
+    provider_slug: &str,
+) -> Result<connectors::models::connection::Model> {
+    insert_provider(
+        db,
+        provider_slug,
+        &format!("{} Provider", provider_slug),
+        "oauth2",
+    )
+    .await?;
+    insert_connection(
+        db,
+        connection_id,
+        tenant_id,
+        provider_slug,
+        "test-external-id",
+    )
+    .await?;
+
+    let connection = connectors::models::connection::Entity::find_by_id(connection_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to find created connection"))?;
+
+    Ok(connection)
+}
+
+/// Creates a test sync job in the database.
+pub async fn create_test_sync_job(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    connection_id: Uuid,
+    provider_slug: &str,
+    status: &str,
+    retry_after: Option<chrono::DateTime<chrono::Utc>>,
+    priority: i16,
+) -> Result<connectors::models::sync_job::Model> {
+    let job_id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+
+    let retry_after_str = retry_after
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or("NULL".to_string());
+
+    let stmt = Statement::from_string(
+        db.get_database_backend(),
+        format!(
+            r#"
+            INSERT INTO sync_jobs (
+                id, tenant_id, provider_slug, connection_id, job_type, status,
+                priority, attempts, scheduled_at, retry_after, started_at, finished_at,
+                cursor, error, created_at, updated_at
+            ) VALUES (
+                '{}', '{}', '{}', '{}', 'full', '{}', {}, 1, '{}', {},
+                NULL, NULL, NULL, NULL, '{}', '{}'
+            )
+            "#,
+            job_id,
+            tenant_id,
+            provider_slug,
+            connection_id,
+            status,
+            priority,
+            now.format("%Y-%m-%d %H:%M:%S"),
+            if retry_after.is_some() {
+                format!("'{}'", retry_after_str)
+            } else {
+                "NULL".to_string()
+            },
+            now.format("%Y-%m-%d %H:%M:%S"),
+            now.format("%Y-%m-%d %H:%M:%S")
+        ),
+    );
+
+    db.execute(stmt).await?;
+
+    let job = connectors::models::sync_job::Entity::find_by_id(job_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to find created job"))?;
+
+    Ok(job)
+}
+
+/// Creates a test sync job with specific attempt count in the database.
+pub async fn create_test_sync_job_with_attempts(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    connection_id: Uuid,
+    provider_slug: &str,
+    status: &str,
+    retry_after: Option<chrono::DateTime<chrono::Utc>>,
+    priority: i16,
+    attempts: i32,
+) -> Result<connectors::models::sync_job::Model> {
+    let job_id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+
+    let retry_after_str = retry_after
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or("NULL".to_string());
+
+    let stmt = Statement::from_string(
+        db.get_database_backend(),
+        format!(
+            r#"
+            INSERT INTO sync_jobs (
+                id, tenant_id, provider_slug, connection_id, job_type, status,
+                priority, attempts, scheduled_at, retry_after, started_at, finished_at,
+                cursor, error, created_at, updated_at
+            ) VALUES (
+                '{}', '{}', '{}', '{}', 'full', '{}', {}, {}, '{}', {},
+                NULL, NULL, NULL, NULL, '{}', '{}'
+            )
+            "#,
+            job_id,
+            tenant_id,
+            provider_slug,
+            connection_id,
+            status,
+            priority,
+            attempts,
+            now.format("%Y-%m-%d %H:%M:%S"),
+            if retry_after.is_some() {
+                format!("'{}'", retry_after_str)
+            } else {
+                "NULL".to_string()
+            },
+            now.format("%Y-%m-%d %H:%M:%S"),
+            now.format("%Y-%m-%d %H:%M:%S")
+        ),
+    );
+
+    db.execute(stmt).await?;
+
+    let job = connectors::models::sync_job::Entity::find_by_id(job_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Failed to find created job"))?;
+
+    Ok(job)
 }

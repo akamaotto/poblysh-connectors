@@ -5,12 +5,13 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
 
 use crate::connectors::{
-    AuthType, Connector, ProviderMetadata, Registry,
-    trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, WebhookParams},
+    AuthType, Connector, Cursor, ProviderMetadata, Registry,
+    trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
 
@@ -36,7 +37,7 @@ impl Connector for JiraConnector {
                 "redirect_uri",
                 &params
                     .redirect_uri
-                    .unwrap_or_else(|| "http://localhost:3000/callback".to_string()),
+                    .unwrap_or_else(|| "https://localhost:3000/callback".to_string()),
             )
             .append_pair(
                 "state",
@@ -101,34 +102,40 @@ impl Connector for JiraConnector {
     async fn sync(
         &self,
         params: SyncParams,
-    ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         // Stub incremental sync based on cursor timestamp.
         // If a cursor is provided, include it in payload for downstream processing.
         let now = DateTime::from(Utc::now());
         let since = params
             .cursor
             .as_ref()
-            .map(|c| c.value.clone())
+            .map(|c| c.as_json().clone())
             .unwrap_or_default();
 
         // Produce a single mock issue_updated signal for demonstration
-        Ok(vec![Signal {
-            id: Uuid::new_v4(),
-            tenant_id: params.connection.tenant_id,
-            provider_slug: "jira".to_string(),
-            connection_id: params.connection.id,
-            kind: "issue_updated".to_string(),
-            occurred_at: now,
-            received_at: now,
-            payload: serde_json::json!({
-                "type": "jira",
-                "event": "issue_updated",
-                "since": since,
-            }),
-            dedupe_key: Some(format!("jira_sync_{}", now.timestamp())),
-            created_at: now,
-            updated_at: now,
-        }])
+        // For demo purposes, show pagination by setting has_more=true and returning a cursor
+        let next_timestamp = now.timestamp() + 1;
+        Ok(SyncResult {
+            signals: vec![Signal {
+                id: Uuid::new_v4(),
+                tenant_id: params.connection.tenant_id,
+                provider_slug: "jira".to_string(),
+                connection_id: params.connection.id,
+                kind: "issue_updated".to_string(),
+                occurred_at: now,
+                received_at: now,
+                payload: serde_json::json!({
+                    "type": "jira",
+                    "event": "issue_updated",
+                    "since": since,
+                }),
+                dedupe_key: Some(format!("jira_sync_{}", now.timestamp())),
+                created_at: now,
+                updated_at: now,
+            }],
+            next_cursor: Some(Cursor::from_string(next_timestamp.to_string())),
+            has_more: true, // Demonstrate pagination for testing
+        })
     }
 
     async fn handle_webhook(
@@ -179,6 +186,6 @@ pub fn register_jira_connector(registry: &mut Registry) {
         true, // webhooks supported
     );
 
-    let connector = Box::new(JiraConnector);
+    let connector = Arc::new(JiraConnector);
     registry.register(connector, metadata);
 }

@@ -24,6 +24,7 @@ use crate::crypto::CryptoKey;
 use crate::error::ApiError;
 use crate::handlers;
 use crate::telemetry::{self, TraceContext};
+use crate::webhook_verification::webhook_verification_middleware;
 use uuid::Uuid;
 
 /// Middleware to generate trace_id and store it in request extensions
@@ -70,6 +71,15 @@ pub fn create_app(state: AppState) -> Router {
             "/connect/{provider}/callback",
             get(handlers::connect::oauth_callback),
         )
+        // Public webhook routes with signature verification
+        .route(
+            "/webhooks/{provider}/{tenant_id}",
+            post(handlers::webhooks::ingest_public_webhook),
+        )
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state.config),
+            webhook_verification_middleware,
+        ))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()));
 
     // Protected routes (auth required)
@@ -209,6 +219,7 @@ pub async fn run_server(
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
         crate::handlers::webhooks::ingest_webhook,
+        crate::handlers::webhooks::ingest_public_webhook,
     ),
     components(
         schemas(
@@ -229,6 +240,8 @@ pub async fn run_server(
             crate::handlers::ReadinessResponse,
             crate::handlers::webhooks::WebhookAcceptResponse,
             crate::handlers::webhooks::ProviderPath,
+            crate::handlers::webhooks::GitHubSignatureHeader,
+            crate::handlers::webhooks::SlackSignatureHeaders,
         ),
     ),
     modifiers(&SecurityAddon),

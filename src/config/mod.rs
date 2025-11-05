@@ -30,6 +30,30 @@ pub struct AppConfig {
     pub operator_tokens: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crypto_key: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_github_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_slack_signing_secret: Option<String>,
+    #[serde(default = "default_webhook_slack_tolerance_seconds")]
+    pub webhook_slack_tolerance_seconds: u64,
+    #[serde(default)]
+    pub scheduler: SchedulerConfig,
+}
+
+/// Scheduler-specific configuration parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct SchedulerConfig {
+    #[serde(default = "default_sync_scheduler_tick_interval_seconds")]
+    pub tick_interval_seconds: u64,
+    #[serde(default = "default_sync_scheduler_default_interval_seconds")]
+    pub default_interval_seconds: u64,
+    #[serde(default = "default_sync_scheduler_jitter_pct_min")]
+    pub jitter_pct_min: f64,
+    #[serde(default = "default_sync_scheduler_jitter_pct_max")]
+    pub jitter_pct_max: f64,
+    #[serde(default = "default_sync_scheduler_max_overridden_interval_seconds")]
+    pub max_overridden_interval_seconds: u64,
 }
 
 impl Default for AppConfig {
@@ -44,6 +68,23 @@ impl Default for AppConfig {
             db_acquire_timeout_ms: default_db_acquire_timeout_ms(),
             operator_tokens: Vec::new(),
             crypto_key: None,
+            webhook_github_secret: None,
+            webhook_slack_signing_secret: None,
+            webhook_slack_tolerance_seconds: default_webhook_slack_tolerance_seconds(),
+            scheduler: SchedulerConfig::default(),
+        }
+    }
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_seconds: default_sync_scheduler_tick_interval_seconds(),
+            default_interval_seconds: default_sync_scheduler_default_interval_seconds(),
+            jitter_pct_min: default_sync_scheduler_jitter_pct_min(),
+            jitter_pct_max: default_sync_scheduler_jitter_pct_max(),
+            max_overridden_interval_seconds: default_sync_scheduler_max_overridden_interval_seconds(
+            ),
         }
     }
 }
@@ -64,6 +105,13 @@ impl AppConfig {
         // Redact crypto key for security
         if config.crypto_key.is_some() {
             config.crypto_key = Some(b"[REDACTED]".to_vec());
+        }
+        // Redact webhook secrets for security
+        if config.webhook_github_secret.is_some() {
+            config.webhook_github_secret = Some("[REDACTED]".to_string());
+        }
+        if config.webhook_slack_signing_secret.is_some() {
+            config.webhook_slack_signing_secret = Some("[REDACTED]".to_string());
         }
         serde_json::to_string_pretty(&config)
     }
@@ -88,6 +136,9 @@ impl AppConfig {
         if !matches!(self.profile.as_str(), "local" | "test") && self.operator_tokens.is_empty() {
             return Err(ConfigError::MissingOperatorTokens);
         }
+
+        // Validate scheduler configuration
+        self.scheduler.validate()?;
 
         Ok(())
     }
@@ -121,6 +172,30 @@ fn default_db_acquire_timeout_ms() -> u64 {
     5000
 }
 
+fn default_webhook_slack_tolerance_seconds() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_sync_scheduler_tick_interval_seconds() -> u64 {
+    60 // 1 minute
+}
+
+fn default_sync_scheduler_default_interval_seconds() -> u64 {
+    900 // 15 minutes
+}
+
+fn default_sync_scheduler_jitter_pct_min() -> f64 {
+    0.0 // 0% minimum jitter
+}
+
+fn default_sync_scheduler_jitter_pct_max() -> f64 {
+    0.2 // 20% maximum jitter
+}
+
+fn default_sync_scheduler_max_overridden_interval_seconds() -> u64 {
+    86400 // 24 hours
+}
+
 /// Errors that can occur while loading configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -142,6 +217,22 @@ pub enum ConfigError {
     InvalidCryptoKeyBase64 { error: String },
     #[error("crypto key must decode to exactly 32 bytes, got {length} bytes")]
     InvalidCryptoKeyLength { length: usize },
+    #[error("sync scheduler tick interval must be between 10 and 300 seconds, got {value}")]
+    InvalidSchedulerTickInterval { value: u64 },
+    #[error(
+        "sync scheduler default interval must be at least 60 seconds and not exceed max override ({max_allowed}), got {value}"
+    )]
+    InvalidSchedulerDefaultInterval { value: u64, max_allowed: u64 },
+    #[error("sync scheduler jitter percentage {field} is out of bounds (min: {min}, max: {max})")]
+    InvalidSchedulerJitterRange { min: f64, max: f64, field: String },
+    #[error(
+        "sync scheduler jitter percentage minimum ({min}) cannot be greater than maximum ({max})"
+    )]
+    InvalidSchedulerJitterInverted { min: f64, max: f64 },
+    #[error(
+        "sync scheduler max overridden interval must be at least 300 seconds (5 minutes), got {value}"
+    )]
+    InvalidSchedulerMaxInterval { value: u64 },
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -232,6 +323,44 @@ impl ConfigLoader {
             Vec::new()
         };
 
+        // Parse webhook secrets
+        let webhook_github_secret = layered.remove("WEBHOOK_GITHUB_SECRET");
+        let webhook_slack_signing_secret = layered.remove("WEBHOOK_SLACK_SIGNING_SECRET");
+        let webhook_slack_tolerance_seconds = layered
+            .remove("WEBHOOK_SLACK_TOLERANCE_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_webhook_slack_tolerance_seconds);
+
+        // Parse sync scheduler configuration
+        let sync_scheduler_tick_interval_seconds = layered
+            .remove("SYNC_SCHEDULER_TICK_INTERVAL_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_sync_scheduler_tick_interval_seconds);
+        let sync_scheduler_default_interval_seconds = layered
+            .remove("SYNC_SCHEDULER_DEFAULT_INTERVAL_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_sync_scheduler_default_interval_seconds);
+        let sync_scheduler_jitter_pct_min = layered
+            .remove("SYNC_SCHEDULER_JITTER_PCT_MIN")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_sync_scheduler_jitter_pct_min);
+        let sync_scheduler_jitter_pct_max = layered
+            .remove("SYNC_SCHEDULER_JITTER_PCT_MAX")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_sync_scheduler_jitter_pct_max);
+        let sync_scheduler_max_overridden_interval_seconds = layered
+            .remove("SYNC_SCHEDULER_MAX_OVERRIDDEN_INTERVAL_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_sync_scheduler_max_overridden_interval_seconds);
+
+        let scheduler = SchedulerConfig {
+            tick_interval_seconds: sync_scheduler_tick_interval_seconds,
+            default_interval_seconds: sync_scheduler_default_interval_seconds,
+            jitter_pct_min: sync_scheduler_jitter_pct_min,
+            jitter_pct_max: sync_scheduler_jitter_pct_max,
+            max_overridden_interval_seconds: sync_scheduler_max_overridden_interval_seconds,
+        };
+
         let config = AppConfig {
             profile,
             api_bind_addr,
@@ -246,6 +375,10 @@ impl ConfigLoader {
             } else {
                 Some(crypto_key)
             },
+            webhook_github_secret,
+            webhook_slack_signing_secret,
+            webhook_slack_tolerance_seconds,
+            scheduler,
         };
 
         // Validate configuration
@@ -314,5 +447,58 @@ impl ConfigLoader {
 impl Default for ConfigLoader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl SchedulerConfig {
+    /// Validate scheduler configuration bounds.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.tick_interval_seconds < 10 || self.tick_interval_seconds > 300 {
+            return Err(ConfigError::InvalidSchedulerTickInterval {
+                value: self.tick_interval_seconds,
+            });
+        }
+
+        if self.default_interval_seconds < 60
+            || self.default_interval_seconds > self.max_overridden_interval_seconds
+        {
+            return Err(ConfigError::InvalidSchedulerDefaultInterval {
+                value: self.default_interval_seconds,
+                max_allowed: self.max_overridden_interval_seconds,
+            });
+        }
+
+        if self.jitter_pct_min < 0.0 || self.jitter_pct_min > 1.0 {
+            return Err(ConfigError::InvalidSchedulerJitterRange {
+                min: self.jitter_pct_min,
+                max: self.jitter_pct_max,
+                field: "minimum percentage".to_string(),
+            });
+        }
+
+        if self.jitter_pct_max < 0.0 || self.jitter_pct_max > 1.0 {
+            return Err(ConfigError::InvalidSchedulerJitterRange {
+                min: self.jitter_pct_min,
+                max: self.jitter_pct_max,
+                field: "maximum percentage".to_string(),
+            });
+        }
+
+        if self.jitter_pct_min > self.jitter_pct_max {
+            return Err(ConfigError::InvalidSchedulerJitterInverted {
+                min: self.jitter_pct_min,
+                max: self.jitter_pct_max,
+            });
+        }
+
+        if self.max_overridden_interval_seconds < 60
+            || self.max_overridden_interval_seconds > 604800
+        {
+            return Err(ConfigError::InvalidSchedulerMaxInterval {
+                value: self.max_overridden_interval_seconds,
+            });
+        }
+
+        Ok(())
     }
 }

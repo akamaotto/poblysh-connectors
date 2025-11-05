@@ -18,6 +18,7 @@ pub enum RegistryError {
 static REGISTRY: OnceLock<Arc<RwLock<Registry>>> = OnceLock::new();
 
 /// Provider registry that stores connectors and their metadata
+#[derive(Clone)]
 pub struct Registry {
     connectors: HashMap<String, Arc<dyn Connector>>,
     metadata: HashMap<String, ProviderMetadata>,
@@ -119,7 +120,7 @@ impl Default for Registry {
 mod tests {
     use super::*;
     use crate::connectors::trait_::{
-        AuthorizeParams, Connector, ExchangeTokenParams, SyncParams, WebhookParams,
+        AuthorizeParams, Connector, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams,
     };
     use crate::models::{connection::Model as Connection, signal::Model as Signal};
     use async_trait::async_trait;
@@ -170,8 +171,12 @@ mod tests {
         async fn sync(
             &self,
             _params: SyncParams,
-        ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok(vec![])
+        ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(SyncResult {
+                signals: vec![],
+                next_cursor: None,
+                has_more: false,
+            })
         }
 
         async fn handle_webhook(
