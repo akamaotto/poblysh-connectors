@@ -6,6 +6,7 @@ pub mod connect;
 pub mod connections;
 pub mod jobs;
 pub mod providers;
+pub mod signals;
 pub mod webhooks;
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};

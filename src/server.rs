@@ -87,6 +87,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/protected/ping", get(handlers::protected_ping))
         .route("/connections", get(handlers::connections::list_connections))
         .route("/jobs", get(handlers::jobs::list_jobs))
+        .route("/signals", get(handlers::signals::list_signals))
         .route("/connect/{provider}", post(handlers::connect::start_oauth))
         .route(
             "/webhooks/{provider}",
@@ -218,6 +219,7 @@ pub async fn run_server(
         crate::handlers::providers::list_providers,
         crate::handlers::connections::list_connections,
         crate::handlers::jobs::list_jobs,
+        crate::handlers::signals::list_signals,
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
         crate::handlers::webhooks::ingest_webhook,
@@ -238,6 +240,9 @@ pub async fn run_server(
             crate::handlers::jobs::JobsResponse,
             crate::handlers::jobs::JobStatusParam,
             crate::handlers::jobs::JobTypeParam,
+            crate::handlers::signals::SignalInfo,
+            crate::handlers::signals::SignalsResponse,
+            crate::handlers::signals::ListSignalsQuery,
 
             crate::handlers::connect::ProviderPath,
             crate::handlers::connect::OAuthCallbackQuery,
@@ -267,6 +272,7 @@ pub async fn run_server(
         (name = "providers", description = "Provider listing endpoints"),
         (name = "webhooks", description = "Webhook ingest endpoints"),
         (name = "jobs", description = "Jobs listing and management endpoints"),
+        (name = "signals", description = "Signals listing and querying endpoints"),
     ),
     security(
         ("bearer_auth" = []),

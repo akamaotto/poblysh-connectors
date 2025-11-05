@@ -392,6 +392,24 @@ pub fn validation_error(message: &str, field_errors: serde_json::Value) -> ApiEr
     ApiError::new(StatusCode::BAD_REQUEST, "VALIDATION_FAILED", message).with_details(field_errors)
 }
 
+/// Repository error for database operations
+#[derive(Debug, Error)]
+pub enum RepositoryError {
+    #[error("Database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("Not found: {0}")]
+    NotFound(String),
+    #[error("Validation error: {0}")]
+    Validation(String),
+}
+
+impl RepositoryError {
+    /// Create a database error wrapper
+    pub fn database_error(err: sea_orm::DbErr) -> Self {
+        Self::Database(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
