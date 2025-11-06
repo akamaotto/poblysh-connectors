@@ -6,6 +6,7 @@
 //! - Individual connector implementations
 
 pub mod example;
+pub mod github;
 pub mod google_drive;
 pub mod jira;
 pub mod metadata;
@@ -13,6 +14,7 @@ pub mod registry;
 pub mod trait_;
 
 pub use example::{ExampleConnector, register_example_connector};
+pub use github::{GitHubConnector, register_github_connector};
 pub use google_drive::{GoogleDriveConnector, register_google_drive_connector};
 pub use jira::{JiraConnector, register_jira_connector};
 pub use metadata::{AuthType, ProviderMetadata};

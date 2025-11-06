@@ -20,10 +20,13 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::auth::auth_middleware;
 use crate::config::AppConfig;
+use crate::connectors::Registry;
 use crate::crypto::CryptoKey;
 use crate::error::ApiError;
 use crate::handlers;
+use crate::repositories::connection::ConnectionRepository;
 use crate::telemetry::{self, TraceContext};
+use crate::token_refresh::TokenRefreshService;
 use crate::webhook_verification::webhook_verification_middleware;
 use uuid::Uuid;
 
@@ -57,6 +60,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub db: DatabaseConnection,
     pub crypto_key: CryptoKey,
+    pub token_refresh_service: Arc<TokenRefreshService>,
 }
 
 /// Creates and configures the Axum application router
@@ -90,11 +94,6 @@ pub fn create_app(state: AppState) -> Router {
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .route("/protected/ping", get(handlers::protected_ping))
-        .route(
-            "/config/rate-limit-policy",
-            get(handlers::config::get_rate_limit_policy_config),
-        )
-        .route("/config/summary", get(handlers::config::get_config_summary))
         .route("/connections", get(handlers::connections::list_connections))
         .route("/jobs", get(handlers::jobs::list_jobs))
         .route("/signals", get(handlers::signals::list_signals))
@@ -171,12 +170,45 @@ pub fn create_app(state: AppState) -> Router {
         .layer(middleware::from_fn(trace_middleware))
 }
 
+/// Creates a test AppState with TokenRefreshService for testing purposes
+pub fn create_test_app_state(config: AppConfig, db: DatabaseConnection) -> AppState {
+    let crypto_key =
+        crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create crypto key for test");
+
+    // Create required dependencies for TokenRefreshService
+    let connection_repo = crate::repositories::ConnectionRepository::new(
+        std::sync::Arc::new(db.clone()),
+        crypto_key.clone(),
+    );
+
+    // Create TokenRefreshService
+    let token_refresh_service =
+        std::sync::Arc::new(crate::token_refresh::TokenRefreshService::new(
+            std::sync::Arc::new(config.clone()),
+            std::sync::Arc::new(db.clone()),
+            std::sync::Arc::new(connection_repo),
+            crate::connectors::registry::Registry::new(),
+        ));
+
+    AppState {
+        config: std::sync::Arc::new(config),
+        db,
+        crypto_key,
+        token_refresh_service,
+    }
+}
+
 /// Starts the server with the given configuration
 pub async fn run_server(
     config: AppConfig,
     db: DatabaseConnection,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_config = Arc::new(config);
+    let shared_db = Arc::new(db);
+
+    // Initialize the connector registry
+    Registry::initialize();
+    println!("Connector registry initialized");
 
     // Create crypto key from config
     let crypto_key = CryptoKey::new(
@@ -188,10 +220,29 @@ pub async fn run_server(
     )
     .map_err(|e| format!("Failed to create crypto key: {}", e))?;
 
+    // Create connection repository for token refresh service
+    let connection_repo = Arc::new(ConnectionRepository::new(
+        shared_db.clone(),
+        crypto_key.clone(),
+    ));
+
+    // Create and start token refresh service
+    let token_refresh_service = Arc::new(TokenRefreshService::new(
+        shared_config.clone(),
+        shared_db.clone(),
+        connection_repo,
+        Registry::global().read().unwrap().clone(),
+    ));
+
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+    let shutdown_token_for_server = shutdown_token.clone();
+    let shutdown_token_for_refresh = shutdown_token.clone();
+
     let state = AppState {
         config: Arc::clone(&shared_config),
-        db,
+        db: (*shared_db).clone(),
         crypto_key,
+        token_refresh_service: Arc::clone(&token_refresh_service),
     };
     let app = create_app(state);
 
@@ -203,9 +254,47 @@ pub async fn run_server(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!("Server listening on: {}", addr);
     println!("Running in profile: {}", shared_config.profile);
+    println!("Token refresh service started");
 
-    axum::serve(listener, app).await?;
+    // Start token refresh service in background
+    let token_refresh_service_clone = token_refresh_service.clone();
+    let token_refresh_handle = tokio::spawn(async move {
+        if let Err(e) = token_refresh_service_clone
+            .run(shutdown_token_for_refresh)
+            .await
+        {
+            eprintln!("Token refresh service error: {:?}", e);
+        }
+    });
 
+    // Start the server with graceful shutdown
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to install Ctrl+C handler");
+                println!("Received shutdown signal");
+                shutdown_token_for_server.cancel();
+            })
+            .await
+    });
+
+    // Wait for either the server or token refresh service to complete
+    tokio::select! {
+        result = server_handle => {
+            if let Err(e) = result {
+                eprintln!("Server error: {:?}", e);
+            }
+        }
+        result = token_refresh_handle => {
+            if let Err(e) = result {
+                eprintln!("Token refresh service error: {:?}", e);
+            }
+        }
+    }
+
+    println!("Server shutdown complete");
     Ok(())
 }
 

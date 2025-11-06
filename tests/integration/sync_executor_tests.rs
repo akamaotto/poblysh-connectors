@@ -6,8 +6,10 @@ use anyhow::Result;
 
 use connectors::config::RateLimitPolicyConfig;
 use connectors::connectors::registry::Registry;
+use connectors::repositories::ConnectionRepository;
 use connectors::seeds::seed_providers;
 use connectors::sync_executor::{ExecutorConfig, SyncExecutor};
+use connectors::token_refresh::TokenRefreshService;
 use test_utils::{create_test_tenant, setup_test_db};
 
 #[tokio::test]
@@ -23,7 +25,27 @@ async fn test_sync_executor_basic_functionality() -> Result<()> {
     let config = ExecutorConfig::default();
     let rate_limit_policy = RateLimitPolicyConfig::default();
     let registry = Registry::global().read().unwrap().clone();
-    let executor = SyncExecutor::new(db.clone(), registry, config, rate_limit_policy);
+
+    // Create required dependencies for TokenRefreshService
+    let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+        .expect("Failed to create crypto key for test");
+    let connection_repo = ConnectionRepository::new(std::sync::Arc::new(db.clone()), crypto_key);
+
+    // Create TokenRefreshService
+    let token_refresh_service = std::sync::Arc::new(TokenRefreshService::new(
+        std::sync::Arc::new(connectors::config::AppConfig::default()),
+        std::sync::Arc::new(db.clone()),
+        std::sync::Arc::new(connection_repo),
+        registry.clone(),
+    ));
+
+    let executor = SyncExecutor::new(
+        db.clone(),
+        registry,
+        config,
+        rate_limit_policy,
+        token_refresh_service,
+    );
 
     // Test that executor was created successfully
     assert_eq!(

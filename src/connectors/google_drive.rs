@@ -3,6 +3,25 @@
 //! Implements OAuth authorize URL generation, stub token exchange/refresh,
 //! webhook channel handling (headers forwarded in payload), and polling fallback
 //! sync returning normalized file change signals.
+//!
+//! ## Webhook Headers
+//!
+//! Google Drive Channel notifications send metadata via HTTP headers. The platform
+//! forwards these headers into the webhook payload under `payload.headers.*` with
+//! lower-case names:
+//!
+//! - `x-goog-channel-id` - Unique identifier for the notification channel
+//! - `x-goog-resource-id` - Identifier for the monitored resource
+//! - `x-goog-resource-state` - State change (`add`, `trash`, `update`, etc.)
+//! - `x-goog-message-number` - Sequential message number for the channel
+//! - `x-goog-resource-uri` - URI for the resource (when present)
+//!
+//! ## Supported Events
+//!
+//! - `file_created` - New file added (resource_state: "add")
+//! - `file_updated` - File content modified (resource_state: "update")
+//! - `file_trashed` - File moved to trash (resource_state: "trash")
+//! - `file_moved` - File moved/renamed (resource_state: "move")
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -16,7 +35,10 @@ use crate::connectors::{
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
 
-/// Google Drive connector (stub)
+/// Google Drive connector (MVP stub implementation)
+///
+/// Provides OAuth2 authorization, token exchange/refresh, webhook handling for
+/// Google Drive Channel notifications, and polling-based sync fallback.
 pub struct GoogleDriveConnector;
 
 #[async_trait]
@@ -26,7 +48,8 @@ impl Connector for GoogleDriveConnector {
         params: AuthorizeParams,
     ) -> Result<Url, Box<dyn std::error::Error + Send + Sync>> {
         // Build a Google OAuth authorize URL (stub values for client id)
-        let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")?;
+        let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+            .map_err(|e| format!("Failed to parse Google OAuth URL: {}", e))?;
         url.query_pairs_mut()
             .append_pair("client_id", "stub_google_client_id")
             .append_pair(
@@ -51,6 +74,7 @@ impl Connector for GoogleDriveConnector {
         params: ExchangeTokenParams,
     ) -> Result<Connection, Box<dyn std::error::Error + Send + Sync>> {
         // Stub token exchange: create a connection record with placeholder tokens
+        // In production, this would exchange the authorization code for access/refresh tokens
         let now = DateTime::from(Utc::now());
         Ok(Connection {
             id: Uuid::new_v4(),
@@ -79,6 +103,7 @@ impl Connector for GoogleDriveConnector {
         connection: Connection,
     ) -> Result<Connection, Box<dyn std::error::Error + Send + Sync>> {
         // Stub refresh: rotate tokens and bump expiry
+        // In production, this would use the refresh token to get a new access token
         let now = DateTime::from(Utc::now());
         Ok(Connection {
             id: connection.id,
@@ -102,6 +127,7 @@ impl Connector for GoogleDriveConnector {
         params: SyncParams,
     ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         // Polling fallback stub: produce a single file_updated signal, include cursor if present
+        // In production, this would use the Drive API changes.list endpoint with incremental sync
         let now = DateTime::from(Utc::now());
         let cursor = params
             .cursor
@@ -137,6 +163,7 @@ impl Connector for GoogleDriveConnector {
         params: WebhookParams,
     ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>> {
         // Google Drive pushes key details via headers; platform should forward into payload.headers
+        // Process Drive Channel notifications and convert to normalized signals
         let now = DateTime::from(Utc::now());
         let headers = params
             .payload
@@ -153,6 +180,7 @@ impl Connector for GoogleDriveConnector {
             "add" => Some("file_created"),
             "trash" => Some("file_trashed"),
             "update" => Some("file_updated"),
+            "move" => Some("file_moved"),
             _ => None,
         };
 

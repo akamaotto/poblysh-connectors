@@ -6,6 +6,9 @@
 //! - Structured error handling for upstream provider failures
 
 use anyhow::{Context, Result as AnyhowResult};
+use connectors::connectors::Registry;
+use connectors::repositories::ConnectionRepository;
+use connectors::token_refresh::TokenRefreshService;
 use connectors::{
     config::AppConfig, repositories::oauth_state::OAuthStateRepository, server::create_app,
 };
@@ -57,10 +60,31 @@ async fn spawn_test_app(config: AppConfig) -> (String, Arc<DatabaseConnection>, 
     // Create app state
     let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
         .expect("Failed to create test crypto key");
+
+    // Create required dependencies for TokenRefreshService
+    let config_arc = Arc::new(config.clone());
+    let db_arc = Arc::new(db.as_ref().clone());
+    let crypto_key_for_repo = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+        .expect("Failed to create test crypto key for repo");
+    let connection_repo = Arc::new(ConnectionRepository::new(
+        db_arc.clone(),
+        crypto_key_for_repo,
+    ));
+    let connector_registry = Registry::new();
+
+    // Create TokenRefreshService
+    let token_refresh_service = Arc::new(TokenRefreshService::new(
+        config_arc,
+        db_arc,
+        connection_repo,
+        connector_registry,
+    ));
+
     let state = connectors::server::AppState {
         config: Arc::new(config.clone()),
         db: db.as_ref().clone(),
         crypto_key,
+        token_refresh_service,
     };
 
     // Create app

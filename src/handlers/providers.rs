@@ -103,13 +103,10 @@ mod tests {
     #[tokio::test]
     async fn test_list_providers_returns_200_with_correct_shape() {
         // Create a mock state (not used by current implementation)
-        let crypto_key =
-            crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
-        let state = AppState {
-            config: std::sync::Arc::new(crate::config::AppConfig::default()),
-            db: sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
-            crypto_key,
-        };
+        let state = crate::server::create_test_app_state(
+            crate::config::AppConfig::default(),
+            sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
+        );
 
         // Call the handler
         let result = list_providers(State(state)).await;

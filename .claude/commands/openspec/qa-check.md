@@ -71,6 +71,9 @@ cargo clippy -- -D warnings
 
 # Verify formatting
 cargo fmt --check
+
+# Check tests
+cargo test --all --all-features --no-fail-fast
 ```
 
 #### 2.2 Static Analysis Integration

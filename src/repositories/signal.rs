@@ -47,6 +47,7 @@ impl<'a> SignalRepository<'a> {
     ///
     /// # Returns
     /// A vector of Signal models ordered by occurred_at DESC, id DESC
+    #[allow(clippy::too_many_arguments)]
     pub async fn list_signals(
         &self,
         tenant_id: Uuid,
@@ -118,11 +119,12 @@ mod tests {
     use crate::config::AppConfig;
     use crate::db::init_pool;
     use crate::models::connection::ActiveModel as ConnectionActiveModel;
-    use crate::models::provider::ActiveModel as ProviderActiveModel;
     use crate::models::signal::ActiveModel as SignalActiveModel;
     use crate::models::tenant::ActiveModel as TenantActiveModel;
+    use crate::repositories::provider::ProviderRepository;
     use chrono::Utc;
     use sea_orm::ActiveModelTrait;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     async fn setup_test_data() -> (DatabaseConnection, Uuid, Uuid, Uuid) {
@@ -141,15 +143,12 @@ mod tests {
         };
         tenant.insert(&db).await.unwrap();
 
-        // Create provider
-        let provider_id = Uuid::new_v4();
-        let provider = ProviderActiveModel {
-            slug: sea_orm::Set("test-provider".to_string()),
-            display_name: sea_orm::Set("Test Provider".to_string()),
-            auth_type: sea_orm::Set("oauth".to_string()),
-            ..Default::default()
-        };
-        provider.insert(&db).await.unwrap();
+        // Ensure provider exists (idempotent across tests)
+        let provider_repo = ProviderRepository::new(Arc::new(db.clone()));
+        provider_repo
+            .upsert("test-provider", "Test Provider", "oauth")
+            .await
+            .unwrap();
 
         // Create connection
         let connection_id = Uuid::new_v4();
@@ -157,11 +156,12 @@ mod tests {
             id: sea_orm::Set(connection_id),
             tenant_id: sea_orm::Set(tenant_id),
             provider_slug: sea_orm::Set("test-provider".to_string()),
+            external_id: sea_orm::Set("test-external-id".to_string()),
             ..Default::default()
         };
         connection.insert(&db).await.unwrap();
 
-        (db, tenant_id, connection_id, provider_id)
+        (db, tenant_id, connection_id, Uuid::nil())
     }
 
     #[tokio::test]
@@ -446,6 +446,7 @@ mod tests {
             id: sea_orm::Set(connection2_id),
             tenant_id: sea_orm::Set(tenant2_id),
             provider_slug: sea_orm::Set("test-provider".to_string()),
+            external_id: sea_orm::Set("tenant2-external-id".to_string()),
             ..Default::default()
         };
         connection2.insert(&db).await.unwrap();

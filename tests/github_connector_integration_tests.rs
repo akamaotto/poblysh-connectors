@@ -315,6 +315,11 @@ async fn test_github_backfill_sync_with_wiremock() {
     // Setup mock server for GitHub API
     let mock_server = MockServer::start().await;
 
+    // Point connector API to mock server
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE", mock_server.uri());
+    }
+
     // Mock issues API endpoint - first page
     Mock::given(method("GET"))
         .and(path("/user/issues"))
@@ -501,6 +506,11 @@ async fn test_github_sync_rate_limit_handling() {
 
     // Setup mock server for GitHub API
     let mock_server = MockServer::start().await;
+
+    // Point connector API to mock server
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE", mock_server.uri());
+    }
 
     // Mock rate limited response
     Mock::given(method("GET"))

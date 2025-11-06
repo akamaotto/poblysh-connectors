@@ -102,12 +102,24 @@ pub async fn insert_connection(
     provider_slug: &str,
     external_id: &str,
 ) -> Result<()> {
-    let stmt = Statement::from_string(
-        db.get_database_backend(),
-        format!(
-            "INSERT INTO connections (id, tenant_id, provider_slug, external_id, status, display_name, access_token_ciphertext, refresh_token_ciphertext, expires_at, scopes, metadata, created_at, updated_at) VALUES ('{}', '{}', '{}', '{}', 'active', '{} connection', NULL, NULL, NULL, '[]', '{{}}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-            id, tenant_id, provider_slug, external_id, provider_slug
-        ),
+    use sea_orm::Value;
+    let backend = db.get_database_backend();
+    let stmt = Statement::from_sql_and_values(
+        backend,
+        "INSERT INTO connections (
+            id, tenant_id, provider_slug, external_id, status, display_name,
+            access_token_ciphertext, refresh_token_ciphertext, expires_at, scopes, metadata,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'active', ?, NULL, NULL, NULL, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        vec![
+            Value::Uuid(Some(Box::new(id))),
+            Value::Uuid(Some(Box::new(tenant_id))),
+            Value::String(Some(Box::new(provider_slug.to_string()))),
+            Value::String(Some(Box::new(external_id.to_string()))),
+            Value::String(Some(Box::new(format!("{} connection", provider_slug)))),
+            Value::Json(Some(Box::new(serde_json::json!([])))),
+            Value::Json(Some(Box::new(serde_json::json!({})))),
+        ],
     );
     db.execute(stmt).await?;
     Ok(())

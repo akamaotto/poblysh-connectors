@@ -1,10 +1,14 @@
 //! Basic integration tests for the Connectors API HTTP surface.
 
+use connectors::connectors::Registry;
+use connectors::repositories::ConnectionRepository;
 use connectors::server::{AppState, create_app};
+use connectors::token_refresh::TokenRefreshService;
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// Helper function to get a random available port
@@ -24,10 +28,31 @@ async fn start_test_server() -> String {
     let db = DatabaseConnection::default();
     let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
         .expect("Failed to create test crypto key");
+
+    // Create required dependencies for TokenRefreshService
+    let config = Arc::new(connectors::config::AppConfig::default());
+    let db_arc = Arc::new(db.clone());
+    let crypto_key_for_repo = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+        .expect("Failed to create test crypto key for repo");
+    let connection_repo = Arc::new(ConnectionRepository::new(
+        db_arc.clone(),
+        crypto_key_for_repo,
+    ));
+    let connector_registry = Registry::new();
+
+    // Create TokenRefreshService
+    let token_refresh_service = Arc::new(TokenRefreshService::new(
+        config.clone(),
+        db_arc,
+        connection_repo,
+        connector_registry,
+    ));
+
     let state = AppState {
-        config: std::sync::Arc::new(connectors::config::AppConfig::default()),
+        config,
         db,
         crypto_key,
+        token_refresh_service,
     };
 
     let app = create_app(state);
@@ -135,10 +160,30 @@ mod signals_tests {
         let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])
             .expect("Failed to create test crypto key");
 
+        // Create required dependencies for TokenRefreshService
+        let config_arc = std::sync::Arc::new(config.clone());
+        let db_arc = std::sync::Arc::new(db.clone());
+        let crypto_key_for_repo = connectors::crypto::CryptoKey::new(vec![0u8; 32])
+            .expect("Failed to create test crypto key for repo");
+        let connection_repo = Arc::new(ConnectionRepository::new(
+            db_arc.clone(),
+            crypto_key_for_repo,
+        ));
+        let connector_registry = Registry::new();
+
+        // Create TokenRefreshService
+        let token_refresh_service = Arc::new(TokenRefreshService::new(
+            config_arc,
+            db_arc,
+            connection_repo,
+            connector_registry,
+        ));
+
         let state = AppState {
             config: std::sync::Arc::new(config),
             db: db.clone(),
             crypto_key,
+            token_refresh_service,
         };
 
         let app = create_app(state);

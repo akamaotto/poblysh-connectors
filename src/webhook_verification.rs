@@ -257,6 +257,56 @@ pub fn verify_webhook_signature(
                 config.webhook_slack_tolerance_seconds,
             )
         }
+        "jira" => {
+            let secret = config
+                .webhook_jira_secret
+                .as_ref()
+                .ok_or_else(|| VerificationError::NotConfigured {
+                    provider: "jira".to_string(),
+                })?;
+
+            // Accept either custom shared secret header or Authorization Bearer secret
+            let provided_secret_header = headers
+                .get("x-webhook-secret")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+
+            if !provided_secret_header.is_empty() {
+                if subtle::ConstantTimeEq::ct_eq(provided_secret_header.as_bytes(), secret.as_bytes())
+                    .into()
+                {
+                    return Ok(());
+                } else {
+                    return Err(VerificationError::VerificationFailed);
+                }
+            }
+
+            // Fallback to Authorization: Bearer <secret>
+            let provided_auth = headers
+                .get("authorization")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+
+            if let Some(token) = provided_auth.strip_prefix("Bearer ") {
+                if subtle::ConstantTimeEq::ct_eq(token.as_bytes(), secret.as_bytes()).into() {
+                    Ok(())
+                } else {
+                    Err(VerificationError::VerificationFailed)
+                }
+            } else if !provided_auth.is_empty() {
+                // No Bearer prefix; compare full auth value
+                if subtle::ConstantTimeEq::ct_eq(provided_auth.as_bytes(), secret.as_bytes()).into()
+                {
+                    Ok(())
+                } else {
+                    Err(VerificationError::VerificationFailed)
+                }
+            } else {
+                Err(VerificationError::MissingSignature {
+                    header: "X-Webhook-Secret or Authorization".to_string(),
+                })
+            }
+        }
         _ => Err(VerificationError::UnsupportedProvider {
             provider: provider.to_string(),
         }),
@@ -285,8 +335,20 @@ pub async fn webhook_verification_middleware(
     let verification_enabled = match provider {
         "github" => config.webhook_github_secret.is_some(),
         "slack" => config.webhook_slack_signing_secret.is_some(),
+        "jira" => config.webhook_jira_secret.is_some(),
         _ => false,
     };
+
+    // For Jira, allow pass-through in local/test when secret not configured
+    if provider == "jira" && !verification_enabled {
+        if matches!(config.profile.as_str(), "local" | "test") {
+            // Allow in dev/test without verification
+            return Ok(next.run(request).await);
+        } else {
+            warn!(provider = %provider, "Webhook verification not configured for provider");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
 
     if !verification_enabled {
         warn!(
@@ -472,5 +534,36 @@ mod tests {
         let config = AppConfig::default();
 
         assert!(verify_webhook_signature("unsupported", body, &headers, &config).is_err());
+    }
+
+    #[test]
+    fn test_jira_secret_verification_with_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Webhook-Secret", "test-secret-123".parse().unwrap());
+
+        let mut config = AppConfig::default();
+        config.webhook_jira_secret = Some("test-secret-123".to_string());
+
+        assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_ok());
+    }
+
+    #[test]
+    fn test_jira_secret_verification_with_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-secret-123".parse().unwrap());
+
+        let mut config = AppConfig::default();
+        config.webhook_jira_secret = Some("test-secret-123".to_string());
+
+        assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_ok());
+    }
+
+    #[test]
+    fn test_jira_secret_verification_missing() {
+        let headers = HeaderMap::new();
+        let mut config = AppConfig::default();
+        config.webhook_jira_secret = Some("test-secret-123".to_string());
+
+        assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_err());
     }
 }

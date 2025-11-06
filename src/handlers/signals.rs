@@ -138,7 +138,7 @@ pub async fn list_signals(
 ) -> Result<Json<SignalsResponse>, ApiError> {
     // Validate and parse limit
     let limit = query.limit.unwrap_or(50);
-    if limit < 1 || limit > 100 {
+    if !(1..=100).contains(&limit) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "VALIDATION_FAILED",
@@ -164,7 +164,8 @@ pub async fn list_signals(
 
     // Validate timestamps if provided
     let occurred_after = if let Some(timestamp_str) = query.occurred_after {
-        match DateTime::parse_from_rfc3339(&timestamp_str) {
+        let ts = timestamp_str.replace(' ', "+");
+        match DateTime::parse_from_rfc3339(&ts) {
             Ok(dt) => Some(dt.with_timezone(&Utc)),
             Err(_) => {
                 return Err(ApiError::new(
@@ -179,7 +180,8 @@ pub async fn list_signals(
     };
 
     let occurred_before = if let Some(timestamp_str) = query.occurred_before {
-        match DateTime::parse_from_rfc3339(&timestamp_str) {
+        let ts = timestamp_str.replace(' ', "+");
+        match DateTime::parse_from_rfc3339(&ts) {
             Ok(dt) => Some(dt.with_timezone(&Utc)),
             Err(_) => {
                 return Err(ApiError::new(
@@ -274,14 +276,12 @@ pub async fn list_signals(
 
     // Generate next cursor if there are more results
     let next_cursor = if has_more {
-        if let Some(last_signal) = signals_to_return.last() {
-            Some(encode_cursor(
+        signals_to_return.last().map(|last_signal| {
+            encode_cursor(
                 &last_signal.occurred_at.with_timezone(&Utc),
                 &last_signal.id,
-            ))
-        } else {
-            None
-        }
+            )
+        })
     } else {
         None
     };
@@ -330,11 +330,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         let app = crate::server::create_app(state.clone());
         (state, app)
@@ -397,11 +393,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         let query = ListSignalsQuery {
             connection_id: Some("invalid-uuid".to_string()),
@@ -437,11 +429,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         let query = ListSignalsQuery {
             connection_id: None,
@@ -477,11 +465,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         // Test limit too high
         let query = ListSignalsQuery {

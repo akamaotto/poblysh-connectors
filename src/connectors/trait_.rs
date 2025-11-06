@@ -3,6 +3,7 @@
 //! Defines the standard interface that all connector implementations must follow.
 
 use async_trait::async_trait;
+use sea_orm::DatabaseConnection;
 use url::Url;
 use uuid::Uuid;
 
@@ -41,7 +42,7 @@ pub enum ConnectorError {
 }
 
 /// Sync-specific error types for structured error handling during sync operations
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SyncError {
     #[serde(flatten)]
     pub kind: SyncErrorKind,
@@ -51,7 +52,7 @@ pub struct SyncError {
     pub details: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncErrorKind {
     /// Authentication/authorization failure
@@ -229,7 +230,7 @@ impl From<ConnectorError> for SyncError {
                         .and_then(|s| s.split_whitespace().next())
                         .and_then(|s| s.parse().ok());
                     SyncError::rate_limited(retry_after)
-                } else if status >= 400 && status < 500 {
+                } else if (400..500).contains(&status) {
                     SyncError::permanent(format!(
                         "HTTP error {}: {}",
                         status,
@@ -335,6 +336,7 @@ pub struct SyncResult {
 pub struct WebhookParams {
     pub payload: serde_json::Value,
     pub tenant_id: Uuid,
+    pub db: Option<DatabaseConnection>,
 }
 
 #[async_trait]

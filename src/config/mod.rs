@@ -441,12 +441,14 @@ impl AppConfig {
             return Err(ConfigError::MissingOperatorTokens);
         }
 
-        // Validate GitHub configuration
-        if self.github_client_id.is_none() {
-            return Err(ConfigError::MissingGitHubClientId);
-        }
-        if self.github_client_secret.is_none() {
-            return Err(ConfigError::MissingGitHubClientSecret);
+        // Validate GitHub configuration (only required outside local/test)
+        if !matches!(self.profile.as_str(), "local" | "test") {
+            if self.github_client_id.is_none() {
+                return Err(ConfigError::MissingGitHubClientId);
+            }
+            if self.github_client_secret.is_none() {
+                return Err(ConfigError::MissingGitHubClientSecret);
+            }
         }
 
         // For non-local and non-test profiles, validate Jira configuration

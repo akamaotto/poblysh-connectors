@@ -45,10 +45,47 @@ impl Registry {
 
         // Register example connector
         crate::connectors::example::register_example_connector(&mut reg);
-        // Register Jira connector
-        crate::connectors::jira::register_jira_connector(&mut reg);
+        // Register Jira connector if configured
+        let jira_client_id = std::env::var("JIRA_CLIENT_ID")
+            .or_else(|_| std::env::var("POBLYSH_JIRA_CLIENT_ID"))
+            .ok();
+        let jira_oauth_base = std::env::var("JIRA_OAUTH_BASE")
+            .or_else(|_| std::env::var("POBLYSH_JIRA_OAUTH_BASE"))
+            .unwrap_or_else(|_| "https://auth.atlassian.com".to_string());
+
+        if let Some(client_id) = jira_client_id {
+            let jira_connector = Arc::new(crate::connectors::JiraConnector::new(
+                client_id,
+                jira_oauth_base,
+            ));
+            crate::connectors::register_jira_connector(&mut reg, jira_connector);
+        }
         // Register Google Drive connector
         crate::connectors::google_drive::register_google_drive_connector(&mut reg);
+
+        // Register GitHub connector if configured
+        // Note: This is a simplified registration - in production, this would use
+        // the actual configuration from the app config
+        let client_id = std::env::var("GITHUB_CLIENT_ID")
+            .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_ID"))
+            .ok();
+        let client_secret = std::env::var("GITHUB_CLIENT_SECRET")
+            .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_SECRET"))
+            .ok();
+
+        if let (Some(client_id), Some(client_secret)) = (client_id, client_secret) {
+            let webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
+                .or_else(|_| std::env::var("POBLYSH_WEBHOOK_GITHUB_SECRET"))
+                .ok();
+
+            let github_connector = Arc::new(crate::connectors::GitHubConnector::new(
+                client_id,
+                client_secret,
+                "https://localhost:3000/callback".to_string(),
+                webhook_secret,
+            ));
+            crate::connectors::register_github_connector(&mut reg, github_connector);
+        }
     }
 
     /// Register a new provider with its connector and metadata

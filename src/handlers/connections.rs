@@ -140,7 +140,6 @@ mod tests {
     use super::*;
     use crate::auth::auth_middleware;
     use crate::config::AppConfig;
-    use crate::server::AppState;
     use axum::{
         Router,
         body::Body,
@@ -160,11 +159,10 @@ mod tests {
         // Create a simple test state - we'll test the logic without requiring a full database
         let crypto_key =
             crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
-        let state = AppState {
-            config: config.clone(),
-            db: sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
-            crypto_key,
-        };
+        let state = crate::server::create_test_app_state(
+            (*config).clone(),
+            sea_orm::Database::connect("sqlite::memory:").await.unwrap(),
+        );
 
         let app = Router::new()
             .route("/connections", get(list_connections))

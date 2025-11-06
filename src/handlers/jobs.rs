@@ -387,11 +387,7 @@ mod tests {
             .await
             .expect("Failed to create test tenant");
 
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db: db.clone(),
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         (state, db, tenant_id)
     }
