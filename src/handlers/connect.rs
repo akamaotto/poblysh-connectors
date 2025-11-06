@@ -7,6 +7,7 @@ use crate::connectors::registry::{Registry, RegistryError};
 use crate::connectors::{AuthorizeParams, ConnectorError, ExchangeTokenParams};
 use crate::error::ApiError;
 
+use crate::repositories::ConnectionRepository;
 use crate::repositories::oauth_state::OAuthStateRepository;
 use crate::server::AppState;
 use axum::{
@@ -138,10 +139,25 @@ pub async fn start_oauth(
         }
     };
 
+    // Determine redirect URI and validate against allowlist
+    let redirect_uri = {
+        // Use default based on profile
+        let profile = std::env::var("POBLYSH_PROFILE").unwrap_or_else(|_| "local".to_string());
+        match profile.as_str() {
+            "local" | "test" => Some("http://localhost:3000/callback".to_string()),
+            _ => Some("https://app.poblysh.com/callback".to_string()),
+        }
+    };
+
+    // Validate redirect URI against allowlist
+    if let Some(ref uri) = redirect_uri {
+        validate_redirect_uri(uri, tenant.0)?;
+    }
+
     // Call connector.authorize(tenant) and return authorization URL
     let authorize_params = AuthorizeParams {
         tenant_id: tenant.0,
-        redirect_uri: None, // TODO: Configure redirect URI based on deployment
+        redirect_uri,
         state: Some(state_token.clone()),
     };
 
@@ -327,23 +343,46 @@ pub async fn oauth_callback(
         }
     };
 
+    // Persist the connection to the database
+    let connection_repo = ConnectionRepository::new(
+        std::sync::Arc::new(state.db.clone()),
+        state.crypto_key.clone(),
+    );
+    let persisted_connection = match connection_repo.create(connection.into()).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            tracing::error!(
+                provider = %provider,
+                tenant_id = %tenant_id,
+                error = %err,
+                "Failed to persist connection to database"
+            );
+
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                "Failed to persist connection",
+            ));
+        }
+    };
+
     tracing::info!(
         tenant_id = %tenant_id,
         provider = %provider,
-        connection_id = %connection.id,
-        "OAuth flow completed successfully"
+        connection_id = %persisted_connection.id,
+        "OAuth flow completed and connection persisted successfully"
     );
 
     // Convert expires_at to RFC3339 string if present
-    let expires_at_str = connection.expires_at.map(|dt| dt.to_rfc3339());
+    let expires_at_str = persisted_connection.expires_at.map(|dt| dt.to_rfc3339());
 
     // Create response
     let response = ConnectionResponse {
         connection: ConnectionInfo {
-            id: connection.id,
-            provider: connection.provider_slug.clone(),
+            id: persisted_connection.id,
+            provider: persisted_connection.provider_slug.clone(),
             expires_at: expires_at_str,
-            metadata: connection.metadata.unwrap_or_default(),
+            metadata: persisted_connection.metadata.unwrap_or_default(),
         },
     };
 
@@ -581,6 +620,61 @@ fn handle_legacy_connector_error(
     }))
 }
 
+/// Validate redirect URI is allowed for the tenant
+pub fn validate_redirect_uri(redirect_uri: &str, tenant_id: uuid::Uuid) -> Result<(), ApiError> {
+    // For MVP, define a basic allowlist pattern
+    // In production, this should come from tenant metadata or configuration
+    let allowed_patterns = [
+        // Local development patterns
+        "http://localhost:3000/callback",
+        "http://localhost:8080/callback",
+        "https://localhost:3000/callback",
+        "https://localhost:8080/callback",
+        // Production patterns (would be tenant-specific in real implementation)
+        "https://app.poblysh.com/callback",
+        "https://*.poblysh.com/callback",
+    ];
+
+    // Check if redirect_uri matches any allowed pattern
+    let is_allowed = allowed_patterns.iter().any(|pattern| {
+        // Simple pattern matching - in production use proper regex or URL matching
+        if pattern.contains('*') {
+            // Basic wildcard support for subdomains
+            let pattern_parts: Vec<&str> = pattern.split('.').collect();
+            let uri_parts: Vec<&str> = redirect_uri.split('.').collect();
+
+            if pattern_parts.len() != uri_parts.len() {
+                return false;
+            }
+
+            for (i, pattern_part) in pattern_parts.iter().enumerate() {
+                if *pattern_part != "*" && pattern_part != &uri_parts[i] {
+                    return false;
+                }
+            }
+            true
+        } else {
+            *pattern == redirect_uri
+        }
+    });
+
+    if !is_allowed {
+        tracing::warn!(
+            tenant_id = %tenant_id,
+            redirect_uri = %redirect_uri,
+            "Redirect URI not in allowlist"
+        );
+
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "Redirect URI is not allowed",
+        ));
+    }
+
+    Ok(())
+}
+
 /// Validate authorization URL meets OAuth 2.0 and security requirements
 fn validate_authorize_url(url: &Url) -> Result<(), ApiError> {
     // Must be HTTPS
@@ -769,13 +863,7 @@ mod tests {
             .expect("Failed to create example provider");
 
         let config = AppConfig::default();
-        let crypto_key =
-            crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
-        AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key,
-        }
+        crate::server::create_test_app_state(config, db)
     }
 
     #[tokio::test]

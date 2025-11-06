@@ -111,29 +111,82 @@ fn extract_connection_id(headers: &HeaderMap) -> Result<Option<Uuid>, ApiError> 
     }
 }
 
-/// Helper function to extract optional JSON body from request
-async fn extract_webhook_body(req: Request) -> Result<Option<JsonValue>, ApiError> {
-    // Always try to read the body, regardless of Content-Length or Transfer-Encoding
-    let (_parts, body) = req.into_parts();
+/// Verify Jira webhook secret
+pub fn verify_jira_webhook_secret(
+    headers: &HeaderMap,
+    _body: &[u8],
+    expected_secret: &str,
+) -> Result<(), ApiError> {
+    // Check for X-Webhook-Secret header (common convention for simple webhook verification)
+    if let Some(secret_header) = headers.get("X-Webhook-Secret") {
+        let provided_secret = secret_header.to_str().map_err(|_| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "Invalid X-Webhook-Secret header encoding",
+            )
+        })?;
 
-    // Read the body once to handle both Content-Length and chunked Transfer-Encoding
-    let bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|_| {
-        ApiError::new(
-            axum::http::StatusCode::BAD_REQUEST,
-            "VALIDATION_FAILED",
-            "Failed to read request body",
-        )
-    })?;
+        if provided_secret == expected_secret {
+            return Ok(());
+        } else {
+            tracing::warn!("Jira webhook secret verification failed: secret mismatch");
+            return Err(ApiError::new(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Invalid webhook secret",
+            ));
+        }
+    }
 
+    // Check for Authorization header with Bearer token (alternative approach)
+    if let Some(auth_header) = headers.get("Authorization") {
+        let auth_str = auth_header.to_str().map_err(|_| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "Invalid Authorization header encoding",
+            )
+        })?;
+
+        // Expect format: "Bearer <secret>" or just "<secret>"
+        let provided_secret = if let Some(bearer_token) = auth_str.strip_prefix("Bearer ") {
+            bearer_token
+        } else {
+            auth_str
+        };
+
+        if provided_secret == expected_secret {
+            return Ok(());
+        } else {
+            tracing::warn!(
+                "Jira webhook secret verification failed: authorization secret mismatch"
+            );
+            return Err(ApiError::new(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Invalid webhook secret",
+            ));
+        }
+    }
+
+    tracing::warn!("Jira webhook secret verification failed: no secret provided");
+    Err(ApiError::new(
+        axum::http::StatusCode::UNAUTHORIZED,
+        "UNAUTHORIZED",
+        "Missing webhook secret",
+    ))
+}
+
+/// Helper function to parse JSON from body bytes
+fn parse_webhook_body_from_bytes(bytes: &[u8]) -> Option<JsonValue> {
     // If body is empty, return None
     if bytes.is_empty() {
-        return Ok(None);
+        return None;
     }
 
     // Try to parse as JSON - if it fails, we still want to capture the raw payload
-    let json_value = serde_json::from_slice(&bytes).ok();
-
-    Ok(json_value)
+    serde_json::from_slice(bytes).ok()
 }
 
 /// Accept webhook from external provider
@@ -176,8 +229,24 @@ pub async fn ingest_webhook(
         "Processing webhook ingestion"
     );
 
-    // Extract headers before consuming the request
+    // Extract headers first, then move request to get body
     let headers = req.headers().clone();
+    let (_parts, body) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|_| {
+        ApiError::new(
+            axum::http::StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "Failed to read request body",
+        )
+    })?;
+
+    // Jira webhook secret verification if WEBHOOK_JIRA_SECRET is configured
+    // Note: For operator-protected route, verification is optional. If configured, enforce; if not, proceed.
+    if provider_slug == "jira" && state.config.webhook_jira_secret.is_some() {
+        let jira_secret = state.config.webhook_jira_secret.as_ref().unwrap();
+        verify_jira_webhook_secret(&headers, &body_bytes, jira_secret)?;
+        debug!("Jira webhook secret verification successful");
+    }
 
     // Filter out sensitive headers before persisting in job cursor
     let sensitive_headers = std::collections::HashSet::from([
@@ -210,6 +279,8 @@ pub async fn ingest_webhook(
         })
         .collect();
 
+    // Operator route: do not require Jira secret; optional verification above is sufficient.
+
     // Validate provider exists
     let provider_repo = ProviderRepository::new(std::sync::Arc::new(state.db.clone()));
     let _provider = provider_repo
@@ -233,10 +304,10 @@ pub async fn ingest_webhook(
         })?;
 
     // Extract connection ID from headers
-    let connection_id = extract_connection_id(req.headers())?;
+    let connection_id = extract_connection_id(&headers)?;
 
-    // Extract webhook body
-    let body = extract_webhook_body(req).await?;
+    // Extract webhook body from already read bytes
+    let body = parse_webhook_body_from_bytes(&body_bytes);
 
     // If connection ID is provided, validate it belongs to tenant and provider
     if let Some(conn_id) = connection_id {
@@ -370,6 +441,19 @@ pub async fn ingest_public_webhook(
     // Extract headers before consuming the request
     let headers = req.headers().clone();
 
+    // Extract body bytes before consuming the request
+    let body_bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("Failed to read webhook body: {}", e);
+            return Err(ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "INVALID_BODY",
+                "Failed to read request body",
+            ));
+        }
+    };
+
     // Filter out sensitive headers before persisting in job cursor
     let sensitive_headers = std::collections::HashSet::from([
         "authorization",
@@ -385,6 +469,7 @@ pub async fn ingest_public_webhook(
         "x-hub-signature-256", // Remove signature headers from persisted data
         "x-slack-signature",
         "x-slack-request-timestamp",
+        "x-webhook-secret", // Remove webhook secret headers from persisted data
     ]);
 
     let webhook_headers: std::collections::HashMap<String, String> = headers
@@ -427,10 +512,10 @@ pub async fn ingest_public_webhook(
         })?;
 
     // Extract connection ID from headers
-    let connection_id = extract_connection_id(req.headers())?;
+    let connection_id = extract_connection_id(&headers)?;
 
-    // Extract webhook body
-    let body = extract_webhook_body(req).await?;
+    // Extract webhook body from already read bytes
+    let body = parse_webhook_body_from_bytes(&body_bytes);
 
     // If connection ID is provided, validate it belongs to tenant and provider
     if let Some(conn_id) = connection_id {
@@ -541,12 +626,18 @@ mod tests {
         // Apply migrations
         Migrator::up(&db, None).await.unwrap();
 
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db);
 
+        let app = crate::server::create_app(state.clone());
+        (state, app)
+    }
+
+    async fn setup_test_app_with_config(config: AppConfig) -> (AppState, axum::Router) {
+        let db = init_pool(&config).await.expect("Failed to init test DB");
+        // Apply migrations
+        Migrator::up(&db, None).await.unwrap();
+
+        let state = crate::server::create_test_app_state(config, db);
         let app = crate::server::create_app(state.clone());
         (state, app)
     }
@@ -730,6 +821,77 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_jira_requires_secret_when_configured() {
+        // Configure test profile with Jira webhook secret
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.operator_tokens = vec!["test-token".to_string()];
+        config.webhook_jira_secret = Some("test-secret-123".to_string());
+
+        let (state, app) = setup_test_app_with_config(config).await;
+
+        // Ensure Jira provider exists
+        create_test_provider(&state, "jira").await;
+
+        let tenant_id = Uuid::new_v4();
+
+        // Missing secret → 401
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/jira/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Wrong secret → 401
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/jira/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Webhook-Secret", "wrong")
+            .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Correct secret → 202
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/jira/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Webhook-Secret", "test-secret-123")
+            .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_jira_allows_without_secret_in_test_profile() {
+        // Configure test profile without Jira webhook secret (allowed for test profile)
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.operator_tokens = vec!["test-token".to_string()];
+
+        let (state, app) = setup_test_app_with_config(config).await;
+
+        // Ensure Jira provider exists
+        create_test_provider(&state, "jira").await;
+
+        let tenant_id = Uuid::new_v4();
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/jira/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
 
     #[tokio::test]

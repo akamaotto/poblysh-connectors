@@ -8,9 +8,14 @@ use crate::config::AppConfig;
 use crate::handlers::root;
 use crate::models::ServiceInfo;
 use crate::server::AppState;
-use axum::{extract::State, response::Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Json,
+};
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn test_root_handler_returns_success() {
@@ -107,4 +112,175 @@ async fn test_service_info_default() {
 
     assert_eq!(service_info.service, "poblysh-connectors");
     assert_eq!(service_info.version, "0.1.0");
+}
+
+// Tests for CRITICAL functionality
+#[cfg(test)]
+mod critical_tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_redirect_uri_allowed_patterns() {
+        // Test allowed redirect URIs
+        let tenant_id = Uuid::new_v4();
+
+        // These should all succeed
+        crate::handlers::connect::validate_redirect_uri(
+            "http://localhost:3000/callback",
+            tenant_id,
+        )
+        .unwrap();
+        crate::handlers::connect::validate_redirect_uri(
+            "https://app.poblysh.com/callback",
+            tenant_id,
+        )
+        .unwrap();
+        crate::handlers::connect::validate_redirect_uri(
+            "https://customer.poblysh.com/callback",
+            tenant_id,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_validate_redirect_uri_blocked_patterns() {
+        // Test blocked redirect URIs
+        let tenant_id = Uuid::new_v4();
+
+        // These should all fail
+        assert!(
+            crate::handlers::connect::validate_redirect_uri("http://evil.com/callback", tenant_id)
+                .is_err()
+        );
+        assert!(
+            crate::handlers::connect::validate_redirect_uri("https://evil.com/callback", tenant_id)
+                .is_err()
+        );
+        assert!(
+            crate::handlers::connect::validate_redirect_uri(
+                "http://localhost:3001/callback",
+                tenant_id
+            )
+            .is_err()
+        );
+        assert!(
+            crate::handlers::connect::validate_redirect_uri(
+                "https://app.poblysh.com/other",
+                tenant_id
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_verify_jira_webhook_secret_valid_header() {
+        // Test valid webhook secret verification via X-Webhook-Secret header
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Webhook-Secret", "test-secret-123".parse().unwrap());
+
+        let body = b"test payload";
+        let result = crate::handlers::webhooks::verify_jira_webhook_secret(
+            &headers,
+            body,
+            "test-secret-123",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_jira_webhook_secret_valid_auth_header() {
+        // Test valid webhook secret verification via Authorization header
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-secret-123".parse().unwrap());
+
+        let body = b"test payload";
+        let result = crate::handlers::webhooks::verify_jira_webhook_secret(
+            &headers,
+            body,
+            "test-secret-123",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_jira_webhook_secret_invalid_secret() {
+        // Test invalid webhook secret
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Webhook-Secret", "wrong-secret".parse().unwrap());
+
+        let body = b"test payload";
+        let result = crate::handlers::webhooks::verify_jira_webhook_secret(
+            &headers,
+            body,
+            "test-secret-123",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_jira_webhook_secret_missing_header() {
+        // Test missing webhook secret headers
+        let headers = HeaderMap::new();
+        let body = b"test payload";
+        let result = crate::handlers::webhooks::verify_jira_webhook_secret(
+            &headers,
+            body,
+            "test-secret-123",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_validation_local_profile_skips_jira() {
+        // Test that local/test profiles don't require Jira configuration
+        let mut config = AppConfig::default();
+        config.profile = "local".to_string();
+        config.github_client_id = Some("test-github-id".to_string());
+        config.github_client_secret = Some("test-github-secret".to_string());
+        config.crypto_key = Some(vec![0u8; 32]);
+
+        // Should succeed even without Jira config
+        assert!(config.validate().is_ok());
+
+        config.profile = "test".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_production_profile_requires_jira() {
+        // Test that production profiles require Jira configuration
+        let mut config = AppConfig::default();
+        config.profile = "production".to_string();
+        config.github_client_id = Some("test-github-id".to_string());
+        config.github_client_secret = Some("test-github-secret".to_string());
+        config.crypto_key = Some(vec![0u8; 32]);
+
+        // Should fail without Jira config
+        assert!(config.validate().is_err());
+
+        // Add Jira config and should succeed
+        config.jira_client_id = Some("test-jira-id".to_string());
+        config.jira_client_secret = Some("test-jira-secret".to_string());
+        config.webhook_jira_secret = Some("test-jira-webhook-secret".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validation_staging_profile_requires_jira() {
+        // Test that staging profiles require Jira configuration
+        let mut config = AppConfig::default();
+        config.profile = "staging".to_string();
+        config.github_client_id = Some("test-github-id".to_string());
+        config.github_client_secret = Some("test-github-secret".to_string());
+        config.crypto_key = Some(vec![0u8; 32]);
+
+        // Should fail without Jira config
+        assert!(config.validate().is_err());
+
+        // Add Jira config and should succeed
+        config.jira_client_id = Some("test-jira-id".to_string());
+        config.jira_client_secret = Some("test-jira-secret".to_string());
+        config.webhook_jira_secret = Some("test-jira-webhook-secret".to_string());
+        assert!(config.validate().is_ok());
+    }
 }

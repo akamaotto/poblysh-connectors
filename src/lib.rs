@@ -18,5 +18,6 @@ pub mod seeds;
 pub mod server;
 pub mod sync_executor;
 pub mod telemetry;
+pub mod token_refresh;
 pub mod webhook_verification;
 pub use migration;

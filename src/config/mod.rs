@@ -34,13 +34,33 @@ pub struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_github_secret: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_oauth_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_api_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_slack_signing_secret: Option<String>,
     #[serde(default = "default_webhook_slack_tolerance_seconds")]
     pub webhook_slack_tolerance_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jira_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jira_client_secret: Option<String>,
+    #[serde(default = "default_jira_oauth_base")]
+    pub jira_oauth_base: String,
+    #[serde(default = "default_jira_api_base")]
+    pub jira_api_base: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_jira_secret: Option<String>,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
     #[serde(default)]
     pub rate_limit_policy: RateLimitPolicyConfig,
+    #[serde(default)]
+    pub token_refresh: TokenRefreshConfig,
 }
 
 /// Scheduler-specific configuration parameters.
@@ -128,6 +148,62 @@ pub struct RateLimitProviderOverride {
     pub jitter_factor: Option<f64>,
 }
 
+/// Token refresh service configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct TokenRefreshConfig {
+    /// Background refresh interval in seconds (default: 3600)
+    #[serde(default = "default_token_refresh_tick_seconds")]
+    pub tick_seconds: u64,
+
+    /// Lead time before expiry to trigger refresh in seconds (default: 600)
+    #[serde(default = "default_token_refresh_lead_time_seconds")]
+    pub lead_time_seconds: u64,
+
+    /// Maximum number of concurrent refresh operations (default: 4)
+    #[serde(default = "default_token_refresh_concurrency")]
+    pub concurrency: u32,
+
+    /// Jitter factor to avoid thundering herd (default: 0.1)
+    #[serde(default = "default_token_refresh_jitter_factor")]
+    pub jitter_factor: f64,
+}
+
+impl TokenRefreshConfig {
+    /// Validate token refresh configuration bounds
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate tick interval (minimum 60 seconds)
+        if self.tick_seconds < 60 {
+            return Err(ConfigError::InvalidTokenRefreshTickInterval {
+                value: self.tick_seconds,
+            });
+        }
+
+        // Validate lead time (minimum 60 seconds, maximum 86400 seconds)
+        if self.lead_time_seconds < 60 || self.lead_time_seconds > 86400 {
+            return Err(ConfigError::InvalidTokenRefreshLeadTime {
+                value: self.lead_time_seconds,
+            });
+        }
+
+        // Validate concurrency (minimum 1, maximum 20)
+        if self.concurrency == 0 || self.concurrency > 20 {
+            return Err(ConfigError::InvalidTokenRefreshConcurrency {
+                value: self.concurrency,
+            });
+        }
+
+        // Validate jitter factor bounds
+        if self.jitter_factor < 0.0 || self.jitter_factor > 1.0 {
+            return Err(ConfigError::InvalidTokenRefreshJitter {
+                value: self.jitter_factor,
+            });
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -141,10 +217,20 @@ impl Default for AppConfig {
             operator_tokens: Vec::new(),
             crypto_key: None,
             webhook_github_secret: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_oauth_base: None,
+            github_api_base: None,
             webhook_slack_signing_secret: None,
+            jira_client_id: None,
+            jira_client_secret: None,
+            jira_oauth_base: default_jira_oauth_base(),
+            jira_api_base: default_jira_api_base(),
+            webhook_jira_secret: None,
             webhook_slack_tolerance_seconds: default_webhook_slack_tolerance_seconds(),
             scheduler: SchedulerConfig::default(),
             rate_limit_policy: RateLimitPolicyConfig::default(),
+            token_refresh: TokenRefreshConfig::default(),
         }
     }
 }
@@ -169,6 +255,17 @@ impl Default for RateLimitPolicyConfig {
             max_seconds: default_rate_limit_max_seconds(),
             jitter_factor: default_rate_limit_jitter_factor(),
             provider_overrides: BTreeMap::new(),
+        }
+    }
+}
+
+impl Default for TokenRefreshConfig {
+    fn default() -> Self {
+        Self {
+            tick_seconds: default_token_refresh_tick_seconds(),
+            lead_time_seconds: default_token_refresh_lead_time_seconds(),
+            concurrency: default_token_refresh_concurrency(),
+            jitter_factor: default_token_refresh_jitter_factor(),
         }
     }
 }
@@ -242,7 +339,7 @@ impl RateLimitPolicyConfig {
         }
 
         // Validate jitter factor bounds
-        if self.jitter_factor < 0.0 || self.jitter_factor > 1.0 {
+        if !(0.0..=1.0).contains(&self.jitter_factor) {
             return Err(ConfigError::InvalidRateLimitJitter {
                 value: self.jitter_factor,
             });
@@ -262,7 +359,7 @@ impl RateLimitPolicyConfig {
                 });
             }
 
-            if jitter < 0.0 || jitter > 1.0 {
+            if !(0.0..=1.0).contains(&jitter) {
                 return Err(ConfigError::InvalidRateLimitProviderJitter {
                     provider: provider.clone(),
                     value: jitter,
@@ -295,8 +392,30 @@ impl AppConfig {
         if config.webhook_github_secret.is_some() {
             config.webhook_github_secret = Some("[REDACTED]".to_string());
         }
+        if config.github_client_id.is_some() {
+            config.github_client_id = Some("[REDACTED]".to_string());
+        }
+        if config.github_client_secret.is_some() {
+            config.github_client_secret = Some("[REDACTED]".to_string());
+        }
         if config.webhook_slack_signing_secret.is_some() {
             config.webhook_slack_signing_secret = Some("[REDACTED]".to_string());
+        }
+        if config.jira_client_id.is_some() {
+            config.jira_client_id = Some("[REDACTED]".to_string());
+        }
+        if config.jira_client_secret.is_some() {
+            config.jira_client_secret = Some("[REDACTED]".to_string());
+        }
+        if !config.jira_oauth_base.is_empty() && config.jira_oauth_base != default_jira_oauth_base()
+        {
+            config.jira_oauth_base = "[REDACTED]".to_string();
+        }
+        if !config.jira_api_base.is_empty() && config.jira_api_base != default_jira_api_base() {
+            config.jira_api_base = "[REDACTED]".to_string();
+        }
+        if config.webhook_jira_secret.is_some() {
+            config.webhook_jira_secret = Some("[REDACTED]".to_string());
         }
         serde_json::to_string_pretty(&config)
     }
@@ -322,11 +441,34 @@ impl AppConfig {
             return Err(ConfigError::MissingOperatorTokens);
         }
 
+        // Validate GitHub configuration
+        if self.github_client_id.is_none() {
+            return Err(ConfigError::MissingGitHubClientId);
+        }
+        if self.github_client_secret.is_none() {
+            return Err(ConfigError::MissingGitHubClientSecret);
+        }
+
+        // For non-local and non-test profiles, validate Jira configuration
+        if !matches!(self.profile.as_str(), "local" | "test") {
+            if self.jira_client_id.is_none() {
+                return Err(ConfigError::MissingJiraClientId);
+            }
+            if self.jira_client_secret.is_none() {
+                return Err(ConfigError::MissingJiraClientSecret);
+            }
+            if self.webhook_jira_secret.is_none() {
+                return Err(ConfigError::MissingJiraWebhookSecret);
+            }
+        }
         // Validate scheduler configuration
         self.scheduler.validate()?;
 
         // Validate rate limit policy configuration
         self.rate_limit_policy.validate()?;
+
+        // Validate token refresh configuration
+        self.token_refresh.validate()?;
 
         Ok(())
     }
@@ -396,6 +538,30 @@ fn default_rate_limit_jitter_factor() -> f64 {
     0.1 // 10% jitter
 }
 
+fn default_token_refresh_tick_seconds() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_token_refresh_lead_time_seconds() -> u64 {
+    600 // 10 minutes
+}
+
+fn default_token_refresh_concurrency() -> u32 {
+    4 // concurrent refresh operations
+}
+
+fn default_token_refresh_jitter_factor() -> f64 {
+    0.1 // 10% jitter
+}
+
+fn default_jira_oauth_base() -> String {
+    "https://auth.atlassian.com".to_string()
+}
+
+fn default_jira_api_base() -> String {
+    "https://api.atlassian.com".to_string()
+}
+
 /// Errors that can occur while loading configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -413,6 +579,18 @@ pub enum ConfigError {
     MissingOperatorTokens,
     #[error("crypto key is missing; set POBLYSH_CRYPTO_KEY environment variable")]
     MissingCryptoKey,
+    #[error("GitHub client ID is missing; set GITHUB_CLIENT_ID environment variable")]
+    MissingGitHubClientId,
+    #[error("GitHub client secret is missing; set GITHUB_CLIENT_SECRET environment variable")]
+    MissingGitHubClientSecret,
+    #[error("Jira client ID is missing; set JIRA_CLIENT_ID environment variable")]
+    MissingJiraClientId,
+    #[error("Jira client secret is missing; set JIRA_CLIENT_SECRET environment variable")]
+    MissingJiraClientSecret,
+    #[error(
+        "Jira webhook secret is missing; set JIRA_WEBHOOK_SECRET or POBLYSH_JIRA_WEBHOOK_SECRET environment variable"
+    )]
+    MissingJiraWebhookSecret,
     #[error("crypto key is invalid base64: {error}")]
     InvalidCryptoKeyBase64 { error: String },
     #[error("crypto key must decode to exactly 32 bytes, got {length} bytes")]
@@ -449,6 +627,14 @@ pub enum ConfigError {
         "provider {provider} rate limit jitter factor must be between 0.0 and 1.0, got {value}"
     )]
     InvalidRateLimitProviderJitter { provider: String, value: f64 },
+    #[error("token refresh tick interval must be at least 60 seconds, got {value}")]
+    InvalidTokenRefreshTickInterval { value: u64 },
+    #[error("token refresh lead time must be between 60 and 86400 seconds, got {value}")]
+    InvalidTokenRefreshLeadTime { value: u64 },
+    #[error("token refresh concurrency must be between 1 and 20, got {value}")]
+    InvalidTokenRefreshConcurrency { value: u32 },
+    #[error("token refresh jitter factor must be between 0.0 and 1.0, got {value}")]
+    InvalidTokenRefreshJitter { value: f64 },
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -541,7 +727,20 @@ impl ConfigLoader {
 
         // Parse webhook secrets
         let webhook_github_secret = layered.remove("WEBHOOK_GITHUB_SECRET");
+        let github_client_id = layered.remove("GITHUB_CLIENT_ID");
+        let github_client_secret = layered.remove("GITHUB_CLIENT_SECRET");
+        let github_oauth_base = layered.remove("GITHUB_OAUTH_BASE");
+        let github_api_base = layered.remove("GITHUB_API_BASE");
         let webhook_slack_signing_secret = layered.remove("WEBHOOK_SLACK_SIGNING_SECRET");
+        let jira_client_id = layered.remove("JIRA_CLIENT_ID");
+        let jira_client_secret = layered.remove("JIRA_CLIENT_SECRET");
+        let jira_oauth_base = layered
+            .remove("JIRA_OAUTH_BASE")
+            .or_else(|| Some(default_jira_oauth_base()));
+        let jira_api_base = layered
+            .remove("JIRA_API_BASE")
+            .or_else(|| Some(default_jira_api_base()));
+        let webhook_jira_secret = layered.remove("WEBHOOK_JIRA_SECRET");
         let webhook_slack_tolerance_seconds = layered
             .remove("WEBHOOK_SLACK_TOLERANCE_SECONDS")
             .and_then(|v| v.parse().ok())
@@ -582,6 +781,24 @@ impl ConfigLoader {
             .remove("RATE_LIMIT_JITTER_FACTOR")
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_rate_limit_jitter_factor);
+
+        // Parse token refresh configuration
+        let token_refresh_tick_seconds = layered
+            .remove("TOKEN_REFRESH_TICK_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_token_refresh_tick_seconds);
+        let token_refresh_lead_time_seconds = layered
+            .remove("TOKEN_REFRESH_LEAD_TIME_SECONDS")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_token_refresh_lead_time_seconds);
+        let token_refresh_concurrency = layered
+            .remove("TOKEN_REFRESH_CONCURRENCY")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_token_refresh_concurrency);
+        let token_refresh_jitter_factor = layered
+            .remove("TOKEN_REFRESH_JITTER_FACTOR")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_token_refresh_jitter_factor);
 
         let scheduler = SchedulerConfig {
             tick_interval_seconds: sync_scheduler_tick_interval_seconds,
@@ -642,6 +859,13 @@ impl ConfigLoader {
             provider_overrides,
         };
 
+        let token_refresh = TokenRefreshConfig {
+            tick_seconds: token_refresh_tick_seconds,
+            lead_time_seconds: token_refresh_lead_time_seconds,
+            concurrency: token_refresh_concurrency,
+            jitter_factor: token_refresh_jitter_factor,
+        };
+
         let config = AppConfig {
             profile,
             api_bind_addr,
@@ -657,10 +881,20 @@ impl ConfigLoader {
                 Some(crypto_key)
             },
             webhook_github_secret,
+            github_client_id,
+            github_client_secret,
+            github_oauth_base,
+            github_api_base,
             webhook_slack_signing_secret,
             webhook_slack_tolerance_seconds,
             scheduler,
             rate_limit_policy,
+            token_refresh,
+            jira_client_id,
+            jira_client_secret,
+            jira_oauth_base: jira_oauth_base.unwrap_or_default(),
+            jira_api_base: jira_api_base.unwrap_or_default(),
+            webhook_jira_secret,
         };
 
         // Validate configuration

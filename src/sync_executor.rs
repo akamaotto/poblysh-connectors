@@ -18,7 +18,8 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::connectors::{
-    ConnectorError, SyncError, SyncErrorKind, SyncParams, SyncResult, registry::Registry,
+    ConnectorError, SyncError, SyncErrorKind, SyncParams, SyncResult, WebhookParams,
+    registry::Registry,
 };
 use crate::models::{
     connection::{ActiveModel as ConnectionActiveModel, Entity as ConnectionEntity},
@@ -26,6 +27,7 @@ use crate::models::{
     sync_job::{self, ActiveModel as SyncJobActiveModel, Entity as SyncJobEntity},
 };
 use crate::repositories::sync_metadata::{ConnectionSyncMetadata, cursor_from_json};
+use crate::token_refresh::TokenRefreshService;
 
 /// Configuration for the sync executor
 #[derive(Debug, Clone)]
@@ -60,6 +62,7 @@ pub struct SyncExecutor {
     pub registry: std::sync::Arc<Registry>,
     config: ExecutorConfig,
     rate_limit_policy: crate::config::RateLimitPolicyConfig,
+    token_refresh_service: std::sync::Arc<TokenRefreshService>,
 }
 
 impl SyncExecutor {
@@ -69,12 +72,14 @@ impl SyncExecutor {
         registry: Registry,
         config: ExecutorConfig,
         rate_limit_policy: crate::config::RateLimitPolicyConfig,
+        token_refresh_service: std::sync::Arc<TokenRefreshService>,
     ) -> Self {
         Self {
             db: std::sync::Arc::new(db),
             registry: std::sync::Arc::new(registry),
             config,
             rate_limit_policy,
+            token_refresh_service,
         }
     }
 
@@ -106,10 +111,10 @@ impl SyncExecutor {
         let mut backoff = (base_seconds * 2_f64.powi(attempts_completed)).min(max_seconds);
 
         // If the error provides retry_after_secs, prefer the max of that and our calculated backoff
-        if let SyncErrorKind::RateLimited { retry_after_secs } = &sync_error.kind {
-            if let Some(retry_after) = retry_after_secs {
-                backoff = backoff.max(*retry_after as f64);
-            }
+        if let SyncErrorKind::RateLimited { retry_after_secs } = &sync_error.kind
+            && let Some(retry_after) = retry_after_secs
+        {
+            backoff = backoff.max(*retry_after as f64);
         }
 
         // Apply jitter
@@ -332,6 +337,9 @@ impl SyncExecutor {
             .await?
             .ok_or("Connection not found")?;
 
+        // Save connection_id for later use (before we move connection)
+        let connection_id = connection.id;
+
         // Get connector
         let connector = self.registry.get(&job.provider_slug)?;
 
@@ -346,18 +354,208 @@ impl SyncExecutor {
                 sync_metadata.cursor
             });
 
-        // Create sync params
-        let sync_params = SyncParams { connection, cursor };
-
-        // Execute sync with timeout
-        let sync_result = tokio::time::timeout(
-            Duration::from_secs(self.config.max_run_seconds),
-            connector.sync(sync_params),
-        )
-        .await
-        .map_err(|_| "Job timed out")??;
+        // Execute job based on job type, with 401 retry logic
+        let sync_result = if job.job_type == "webhook" {
+            tokio::time::timeout(
+                Duration::from_secs(self.config.max_run_seconds),
+                self.execute_webhook_with_retry(
+                    connector.as_ref(),
+                    &connection,
+                    job.cursor.as_ref(),
+                    &connection_id,
+                ),
+            )
+            .await
+            .map_err(|_| "Job timed out")??
+        } else {
+            let sync_params = SyncParams { connection, cursor };
+            tokio::time::timeout(
+                Duration::from_secs(self.config.max_run_seconds),
+                self.execute_sync_with_retry(connector.as_ref(), sync_params, &connection_id),
+            )
+            .await
+            .map_err(|_| "Job timed out")??
+        };
 
         Ok(sync_result)
+    }
+
+    /// Execute webhook with automatic retry on 401 unauthorized errors
+    async fn execute_webhook_with_retry(
+        &self,
+        connector: &dyn crate::connectors::Connector,
+        connection: &crate::models::connection::Model,
+        cursor: Option<&serde_json::Value>,
+        connection_id: &Uuid,
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Extract webhook context from cursor
+        let webhook_payload = cursor.and_then(|c| c.get("webhook_payload").cloned());
+        let _webhook_headers = cursor.and_then(|c| c.get("webhook_headers").cloned());
+
+        let payload = match webhook_payload {
+            Some(p) => p,
+            None => serde_json::Value::Object(serde_json::Map::new()), // Empty payload if not found
+        };
+
+        // Create webhook params (headers are included in payload as per WebhookParams structure)
+        let webhook_params = WebhookParams {
+            payload,
+            tenant_id: connection.tenant_id,
+            db: Some(self.db.as_ref().clone()),
+        };
+
+        // First attempt
+        match connector.handle_webhook(webhook_params.clone()).await {
+            Ok(signals) => {
+                // Convert webhook signals to sync result format
+                Ok(SyncResult {
+                    signals,
+                    next_cursor: None, // Webhooks don't typically update cursors
+                    has_more: false,
+                })
+            }
+            Err(e) => {
+                // Check if this is an unauthorized error that might be resolved by token refresh
+                let sync_error = e
+                    .downcast_ref::<SyncError>()
+                    .cloned()
+                    .or_else(|| {
+                        e.downcast_ref::<ConnectorError>()
+                            .map(|connector_err| SyncError::from(connector_err.clone()))
+                    });
+
+                if let Some(sync_error) = sync_error {
+                    if sync_error.kind == SyncErrorKind::Unauthorized {
+                        // Attempt token refresh
+                        info!(
+                            connection_id = %connection_id,
+                            "Webhook failed with unauthorized error, attempting token refresh"
+                        );
+
+                        match self
+                            .token_refresh_service
+                            .refresh_on_demand(connection_id)
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    connection_id = %connection_id,
+                                    "Token refreshed successfully, retrying webhook"
+                                );
+
+                                // Retry the webhook once after successful token refresh
+                                match connector.handle_webhook(webhook_params).await {
+                                    Ok(signals) => {
+                                        // Convert webhook signals to sync result format
+                                        Ok(SyncResult {
+                                            signals,
+                                            next_cursor: None,
+                                            has_more: false,
+                                        })
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            connection_id = %connection_id,
+                                            error = ?e,
+                                            "Webhook failed even after token refresh"
+                                        );
+                                        Err(format!("Webhook failed after token refresh: {:?}", e)
+                                            .into())
+                                    }
+                                }
+                            }
+                            Err(refresh_error) => {
+                                error!(
+                                    connection_id = %connection_id,
+                                    error = ?refresh_error,
+                                    "Token refresh failed for webhook"
+                                );
+                                Err(format!(
+                                    "Token refresh failed for webhook: {:?}",
+                                    refresh_error
+                                )
+                                .into())
+                            }
+                        }
+                    } else {
+                        // Different error, just propagate it
+                        Err(format!("Webhook failed with non-unauthorized error: {:?}", e).into())
+                    }
+                } else {
+                    // Non-sync error, just propagate it
+                    Err(format!("Webhook failed with error: {:?}", e).into())
+                }
+            }
+        }
+    }
+
+    /// Execute sync with automatic retry on 401 unauthorized errors
+    async fn execute_sync_with_retry(
+        &self,
+        connector: &dyn crate::connectors::Connector,
+        sync_params: SyncParams,
+        connection_id: &Uuid,
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+        // First attempt
+        match connector.sync(sync_params.clone()).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // Check if this is an unauthorized error that might be resolved by token refresh
+                let sync_error = e
+                    .downcast_ref::<SyncError>()
+                    .cloned()
+                    .or_else(|| {
+                        e.downcast_ref::<ConnectorError>()
+                            .map(|connector_err| SyncError::from(connector_err.clone()))
+                    });
+
+                if let Some(sync_err) = sync_error
+                    && matches!(sync_err.kind, SyncErrorKind::Unauthorized)
+                {
+                    info!(
+                        connection_id = %connection_id,
+                        "Received 401 error, attempting token refresh and retry"
+                    );
+
+                    // Attempt token refresh
+                    match self
+                        .token_refresh_service
+                        .refresh_on_demand(connection_id)
+                        .await
+                    {
+                        Ok(refresh_result) if refresh_result.success => {
+                            info!(
+                                connection_id = %connection_id,
+                                "Token refresh successful, retrying sync operation"
+                            );
+
+                            // Retry the sync operation once with refreshed tokens
+                            let retry_result = connector.sync(sync_params).await?;
+                            Ok(retry_result)
+                        }
+                        Ok(refresh_result) => {
+                            warn!(
+                                connection_id = %connection_id,
+                                error = %refresh_result.error.unwrap_or_else(|| "Unknown".to_string()),
+                                "Token refresh failed, marking job as failed"
+                            );
+                            Err(e)
+                        }
+                        Err(refresh_error) => {
+                            warn!(
+                                connection_id = %connection_id,
+                                error = ?refresh_error,
+                                "Token refresh service error, marking job as failed"
+                            );
+                            Err(e)
+                        }
+                    }
+                } else {
+                    // Not a 401 error or no sync error could be extracted, fail normally
+                    Err(e)
+                }
+            }
+        }
     }
 
     /// Handle successful job completion
@@ -537,6 +735,7 @@ impl Clone for SyncExecutor {
             registry: self.registry.clone(),
             config: self.config.clone(),
             rate_limit_policy: self.rate_limit_policy.clone(),
+            token_refresh_service: self.token_refresh_service.clone(),
         }
     }
 }
@@ -562,7 +761,23 @@ mod tests {
             .expect("Failed to create in-memory database");
         let registry = Registry::new();
         let config = ExecutorConfig::default();
-        SyncExecutor::new(db, registry, config, policy)
+
+        // Create required dependencies for TokenRefreshService
+        let crypto_key = crate::crypto::CryptoKey::new(vec![0u8; 32])
+            .expect("Failed to create crypto key for sync executor");
+        use crate::repositories::ConnectionRepository;
+        let connection_repo =
+            ConnectionRepository::new(std::sync::Arc::new(db.clone()), crypto_key);
+
+        // Create TokenRefreshService
+        let token_refresh_service = std::sync::Arc::new(TokenRefreshService::new(
+            std::sync::Arc::new(crate::config::AppConfig::default()),
+            std::sync::Arc::new(db.clone()),
+            std::sync::Arc::new(connection_repo),
+            registry.clone(),
+        ));
+
+        SyncExecutor::new(db, registry, config, policy, token_refresh_service)
     }
 
     #[tokio::test]

@@ -216,11 +216,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         let app = crate::server::create_app(state.clone());
         (state, app)
@@ -286,11 +282,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         // Apply migrations to ensure ready state
         Migrator::up(&state.db, None).await.unwrap();
@@ -315,11 +307,7 @@ mod tests {
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
 
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         // Apply migrations to ensure healthy state
         Migrator::up(&state.db, None).await.unwrap();
@@ -353,11 +341,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         // Ensure we're in a clean state - run migrations first
         Migrator::up(&state.db, None).await.unwrap();
@@ -385,11 +369,7 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
-        let state = AppState {
-            config: std::sync::Arc::new(config),
-            db,
-            crypto_key: crate::crypto::CryptoKey::new([0; 32].to_vec()).unwrap(),
-        };
+        let state = crate::server::create_test_app_state(config, db.clone());
 
         // Apply migrations first to ensure we're in a healthy state
         Migrator::up(&state.db, None).await.unwrap();

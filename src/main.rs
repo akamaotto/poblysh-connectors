@@ -183,12 +183,29 @@ async fn handle_sync_executor_command(
     println!("  Max run time: {}s", executor_config.max_run_seconds);
     println!("  Max items per run: {}", executor_config.max_items_per_run);
 
-    // Create sync executor
+    // Create crypto key and connection repository
+    let crypto_key =
+        connectors::crypto::CryptoKey::new(config.crypto_key.as_ref().unwrap().clone())
+            .map_err(|e| format!("Failed to create crypto key: {}", e))?;
+    // For now, create sync executor without token refresh service due to type issues
+    // TODO: Reintegrate token refresh service once types are resolved
     let executor = connectors::sync_executor::SyncExecutor::new(
-        db,
+        db.clone(),
         Registry::global().read().unwrap().clone(),
         executor_config,
-        config.rate_limit_policy,
+        config.rate_limit_policy.clone(),
+        // Temporary placeholder - proper implementation needed
+        std::sync::Arc::new(connectors::token_refresh::TokenRefreshService::new(
+            std::sync::Arc::new(config.clone()),
+            std::sync::Arc::new(db.clone()),
+            std::sync::Arc::new(
+                connectors::repositories::connection::ConnectionRepository::new(
+                    std::sync::Arc::new(db.clone()),
+                    crypto_key,
+                ),
+            ),
+            Registry::global().read().unwrap().clone(),
+        )),
     );
 
     println!("Sync executor started. Press Ctrl+C to stop.");
