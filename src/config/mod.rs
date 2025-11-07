@@ -56,6 +56,8 @@ pub struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_jira_secret: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_zoho_cliq_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gmail_scopes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pubsub_oidc_audience: Option<String>,
@@ -239,6 +241,7 @@ impl Default for AppConfig {
             jira_oauth_base: default_jira_oauth_base(),
             jira_api_base: default_jira_api_base(),
             webhook_jira_secret: None,
+            webhook_zoho_cliq_token: None,
             gmail_scopes: None,
             pubsub_oidc_audience: None,
             pubsub_oidc_issuers: None,
@@ -434,6 +437,9 @@ impl AppConfig {
         }
         if config.webhook_jira_secret.is_some() {
             config.webhook_jira_secret = Some("[REDACTED]".to_string());
+        }
+        if config.webhook_zoho_cliq_token.is_some() {
+            config.webhook_zoho_cliq_token = Some("[REDACTED]".to_string());
         }
         serde_json::to_string_pretty(&config)
     }
@@ -776,6 +782,7 @@ impl ConfigLoader {
             .remove("JIRA_API_BASE")
             .or_else(|| Some(default_jira_api_base()));
         let webhook_jira_secret = layered.remove("WEBHOOK_JIRA_SECRET");
+        let webhook_zoho_cliq_token = layered.remove("WEBHOOK_ZOHO_CLIQ_TOKEN");
 
         // Parse Gmail configuration
         let gmail_scopes = layered.remove("GMAIL_SCOPES");
@@ -949,6 +956,7 @@ impl ConfigLoader {
             jira_oauth_base: jira_oauth_base.unwrap_or_default(),
             jira_api_base: jira_api_base.unwrap_or_default(),
             webhook_jira_secret,
+            webhook_zoho_cliq_token,
             gmail_scopes,
             gmail_client_id,
             gmail_client_secret,

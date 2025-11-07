@@ -17,10 +17,10 @@ Details:
 The connector SHALL handle Zoho Cliq outgoing webhook payloads for message events and emit normalized Signals.
 
 Details (MVP):
-- Verification:
-  - Signature: MUST verify `X-Cliq-Signature` with format `sha256=<hex>` computed over the exact raw request body using `POBLYSH_WEBHOOK_ZOHO_CLIQ_SECRET`
-  - Timestamp (if present): if `X-Cliq-Timestamp` is provided, enforce a 300s (5‑minute) tolerance window to mitigate replay
-  - Fallback: if signature headers are not used by the provider configuration, support a constant‑time comparison of `POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN` against a header or query token
+- Verification (MVP):
+  - Token-based: MUST verify `Authorization: Bearer <POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN>` using constant‑time comparison.
+  - Do not accept query parameters for secrets.
+  - Note: HMAC support MAY be introduced in a follow‑up change if Cliq docs confirm exact header names and signature construction.
 - Header forwarding: all request headers MUST be forwarded into `payload.headers` with lower‑case keys to simplify matching
 - Signal kinds (MVP): `message_posted`, `message_updated`, `message_deleted`
 - Mapping: derive kind from payload action/type fields; include normalized fields `{ message_id, channel_id, user_id, text, occurred_at }`
@@ -53,7 +53,7 @@ The connector SHALL return a clear error or no‑op for OAuth methods in MVP.
 The Zoho Cliq webhooks SHALL use the public webhook path variant `POST /webhooks/zoho-cliq/{tenant}` and follow the platform’s public access rules.
 
 #### Scenario: Signed public request accepted
-- **WHEN** calling `POST /webhooks/zoho-cliq/{tenant}` without operator auth but with valid `x-cliq-signature` (and timestamp if provided) or a valid shared token
+- **WHEN** calling `POST /webhooks/zoho-cliq/{tenant}` without operator auth but with valid `Authorization: Bearer <token>` matching `POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN`
 - **THEN** the response is HTTP 202 with body `{ "status": "accepted" }` and the request is processed; `payload.headers` MUST contain lower‑case keys
 
 #### Scenario: Invalid signature/token rejected

@@ -87,6 +87,12 @@ pub async fn list_providers(
             ],
             webhooks: true,
         },
+        ProviderInfo {
+            name: "zoho-cliq".to_string(),
+            auth_type: "webhook".to_string(),
+            scopes: vec![],
+            webhooks: true,
+        },
     ];
 
     // Stable ascending sort by name
@@ -116,14 +122,14 @@ mod tests {
         let response = result.unwrap();
 
         // Verify the structure and data
-        assert_eq!(response.providers.len(), 5);
+        assert_eq!(response.providers.len(), 6);
 
         // Check that providers are sorted by name
         let provider_names: Vec<String> =
             response.providers.iter().map(|p| p.name.clone()).collect();
         assert_eq!(
             provider_names,
-            vec!["github", "google-workspace", "jira", "slack", "zoho"]
+            vec!["github", "google-workspace", "jira", "slack", "zoho", "zoho-cliq"]
         );
 
         // Verify specific provider data
@@ -149,6 +155,16 @@ mod tests {
                 .iter()
                 .any(|s| s.starts_with("https://www.googleapis.com/"))
         );
+
+        // Test zoho-cliq provider
+        let zoho_cliq = response
+            .providers
+            .iter()
+            .find(|p| p.name == "zoho-cliq")
+            .expect("zoho-cliq provider should be present");
+        assert_eq!(zoho_cliq.auth_type, "webhook");
+        assert!(zoho_cliq.webhooks);
+        assert!(zoho_cliq.scopes.is_empty()); // No OAuth scopes for webhook-only provider
     }
 
     #[test]

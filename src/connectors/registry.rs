@@ -125,6 +125,33 @@ impl Registry {
             ));
             crate::connectors::register_github_connector(&mut reg, github_connector);
         }
+
+        // Register Zoho Mail connector if configured
+        if std::env::var("POBLYSH_ZOHO_MAIL_CLIENT_ID").is_ok()
+            && std::env::var("POBLYSH_ZOHO_MAIL_CLIENT_SECRET").is_ok()
+            && std::env::var("POBLYSH_ZOHO_MAIL_DC").is_ok()
+        {
+            match crate::connectors::zoho_mail::ZohoMailConnector::new_from_env() {
+                Ok(conn) => {
+                    crate::connectors::zoho_mail::register_zoho_mail_connector(
+                        &mut reg,
+                        Arc::new(conn),
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "Zoho Mail connector not registered due to configuration error: {}",
+                        err
+                    );
+                }
+            }
+        } else {
+            warn!("Zoho Mail connector not registered: missing Zoho Mail client credentials or DC");
+        }
+
+        // Register Zoho Cliq connector (webhook-only, no config required for MVP)
+        let zoho_cliq_connector = Arc::new(crate::connectors::ZohoCliqConnector::new());
+        crate::connectors::register_zoho_cliq_connector(&mut reg, zoho_cliq_connector);
     }
 
     /// Register a new provider with its connector and metadata

@@ -22,9 +22,9 @@ Teams use Zoho Cliq for chat collaboration. We need a webhook‑only Zoho Cliq c
 - Channel management or webhook provisioning APIs (manual configuration expected in MVP).
 
 ## Acceptance Criteria
-- `POST /webhooks/zoho-cliq/{tenant}` accepts signed (HMAC) or token‑authenticated requests and returns 202 with body `{ "status": "accepted" }` per public webhook spec.
-- Valid message events produce Signals with kinds: `message_posted`, `message_updated`, or `message_deleted`, including normalized fields: `{ message_id, channel_id, user_id, text, occurred_at, raw }`; `payload.headers` keys are lower‑case.
-- Invalid or unauthenticated requests are rejected with 401 (no operator auth), following existing signature/token verification flows.
+- `POST /webhooks/zoho-cliq/{tenant}` accepts token‑authenticated requests via `Authorization: Bearer <POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN>` and returns 202 with body `{ "status": "accepted" }` per public webhook spec.
+- Valid message events produce Signals with kinds: `message_posted`, `message_updated`, or `message_deleted`, including normalized fields: `{ message_id, channel_id, user_id, text, occurred_at }`; `payload.headers` keys are lower‑case.
+- Invalid or unauthenticated requests are rejected with 401 (no operator auth), following existing token verification flows.
 - `openspec validate add-zoho-cliq-connector --strict` passes.
 
 ## Core Technologies and Versions
@@ -32,29 +32,29 @@ Teams use Zoho Cliq for chat collaboration. We need a webhook‑only Zoho Cliq c
 - serde `1.0.217`, serde_json `1.0.138`
 - tracing `0.1.41`, tracing-subscriber `0.3.19`
 - subtle `2.6.1` for constant‑time comparison (already present)
-- NEW: hmac `0.12.1` and sha2 `0.10.8` (HMAC‑SHA256 verification) — align with existing signature verification change
-- Optional future backfill: reqwest `0.12.9` (already in dev-deps; promote to runtime dep later when OAuth/API is added)
+- hmac `0.12.1` and sha2 `0.10.8` are already present (for optional future HMAC) — not required for token‑only MVP
+- reqwest `0.12.9` is already a runtime dependency; not required for this webhook‑only MVP
 
 ## Research Plan (Lightweight Deep Research Algorithm)
-Goal: confirm Zoho Cliq webhook authentication model, payload shapes for message events, and best‑practice handling; select precise verification method and headers.
+Goal: confirm Zoho Cliq webhook authentication model, payload shapes for message events, and best‑practice handling; MVP uses `Authorization: Bearer` token; HMAC path is follow‑up if docs confirm exact headers and construction.
 
 1) Parallel discovery (run concurrently)
-   - Web docs: search "Zoho Cliq outgoing webhooks", "Zoho Cliq message webhook payload", "Zoho Cliq HMAC signature"
+   - Web docs: search "Zoho Cliq outgoing webhooks", "Zoho Cliq message webhook payload", and authentication options
    - API docs: browse Zoho Cliq REST and platform docs for "Outgoing Webhooks", "Incoming Webhooks" and authentication sections
-   - Community: scan StackOverflow, GitHub issues, Zoho community for pitfalls (signature headers, timestamps, retries)
+   - Community: scan StackOverflow, GitHub issues, Zoho community for pitfalls (headers, timestamps, retries)
    - Codebase scan: `rg -n "webhook|signature|hmac|zoho|cliq"` to reuse helper patterns
 
 2) Sequential reinforcement (narrow and verify)
-   - From docs, extract exact header names and algorithms (e.g., `X-Cliq-Signature` HMAC vs static token); confirm shared secret configuration steps
+   - From docs, extract exact header names and algorithms if HMAC exists; confirm token configuration steps
    - Validate payload examples: identify message fields (`message_id`, `channel_id`, `user_id`, `text`, `ts`) and any delivery id
    - Cross‑check multiple sources; if conflicts, prefer primary docs; confirm with test payloads if sample tool available
    - Map to normalized Signal fields; define `dedupe_key` using event/message id or delivery id
    - Capture rate limits and retry behaviors; decide idempotency strategy for duplicate deliveries
 
 3) Synthesis and decisions
-   - Choose verification path: HMAC (preferred) or token; define exact header names and tolerance (timestamps/replay if available)
-   - Update spec with concrete header names, examples, and error codes
-   - Lock crate versions and finalize configuration names: `POBLYSH_WEBHOOK_ZOHO_CLIQ_SECRET|TOKEN`
+   - Use token‑based verification for MVP; if HMAC is confirmed, add a follow‑up change with concrete header names, examples, and error codes
+   - Keep crate versions as in Cargo.toml; no new runtime crates required
+   - Finalize configuration name: `POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN`
 
 Reference docs to consult (to be verified during research execution)
 - Zoho Cliq REST/Platform: Outgoing webhooks guide and message event payloads

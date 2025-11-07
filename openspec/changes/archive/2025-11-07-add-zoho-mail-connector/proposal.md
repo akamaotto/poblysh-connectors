@@ -9,7 +9,7 @@ Zoho Mail is a common enterprise email provider for teams using the Zoho suite. 
   - `refresh_token(connection)` → standard OAuth2 refresh flow
   - `sync(connection, cursor?)` → incremental polling using Zoho Mail Email Messages API with a dedupe window: query from `(cursor.timestamp - window)` and deduplicate by message identity + last-modified to avoid duplicates
   - `handle_webhook(payload)` → not supported in MVP (explicit unsupported error)
-- Define normalized email Signals (MVP): `email_received`, `email_updated`, and `email_deleted`. Include stable fields like `message_id`, `thread_id` (if exposed), `folder_id`, `from`, `to`, `subject`, `occurred_at`, and `raw` subset (provider payload excerpt when helpful).
+- Define normalized email Signals (MVP): `email_received`, `email_updated`, and `email_deleted`. Align with existing email connectors by including stable fields like `provider_message_id`, `thread_id` (if exposed), `folder_id`, `from`, `to`, `subject`, `occurred_at` (RFC3339, UTC), and a `raw` subset (provider payload excerpt when helpful).
 
 ## Impact
 - Affected specs: `connectors` (new Zoho Mail requirements), optional `config` for region/DC and scopes.
@@ -91,10 +91,10 @@ Goal: confirm the exact Zoho Mail endpoints, query parameters for time-range inc
 - Handle invalid cursor (e.g., out-of-range time) by bumping the dedupe window or resetting to a safe baseline with a diagnostic Signal.
 
 ## Configuration
-- `POBLYSH_ZOHO_DC` — Zoho data center/region (e.g., `us`, `eu`, `in`; also supports `au`, `jp`, etc.) to select Accounts/API base URLs via a resolver mapping
+- `POBLYSH_ZOHO_MAIL_DC` — Zoho Mail data center/region (e.g., `us`, `eu`, `in`, `au`, `jp`, `ca`, `sa`, `uk`) to select Accounts/API base URLs via a resolver mapping
 - `POBLYSH_ZOHO_MAIL_SCOPES` — space/comma-delimited scopes (default: `ZohoMail.messages.READ`)
-- `POBLYSH_ZOHO_MAIL_POLL_WINDOW_SECS` — dedupe window in seconds (default: `300`)
-- `POBLYSH_HTTP_TIMEOUT_SECS` — HTTP client timeout for polling (default: `15`)
+- `POBLYSH_ZOHO_MAIL_DEDUPE_WINDOW_SECS` — dedupe window in seconds (default: `300`)
+- `POBLYSH_ZOHO_MAIL_HTTP_TIMEOUT_SECS` — Zoho Mail HTTP client timeout for polling (default: `15`)
 
 ## Data Model Notes
 - Per-connection cursor stores `last_processed_ts` as RFC3339 string (UTC); on each successful sync, advance to the max seen `lastModifiedTime`.

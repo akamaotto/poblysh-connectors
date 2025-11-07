@@ -30,8 +30,8 @@ pub struct ProviderPath {
 /// Path parameter for provider slug and tenant ID (public webhook routes)
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct ProviderTenantPath {
-    /// Provider slug (e.g., "github", "jira")
-    #[param(min_length = 1, example = "github")]
+    /// Provider slug (e.g., "github", "jira", "zoho-cliq")
+    #[param(min_length = 1, example = "zoho-cliq")]
     pub provider: String,
     /// Tenant UUID for scoping the webhook
     #[param(example = "550e8400-e29b-41d4-a716-446655440000")]
@@ -497,11 +497,16 @@ pub async fn ingest_webhook(
 /// This endpoint receives webhook callbacks from external providers without requiring
 /// operator authentication when a valid provider signature is present. The tenant_id
 /// is provided in the URL path to convey tenant context.
+///
+/// **Zoho Cliq Usage**: Configure Zoho Cliq outgoing webhooks to point to:
+/// `POST /webhooks/zoho-cliq/{tenant_id}` with Authorization header set to:
+/// `Bearer {POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN}`
 #[utoipa::path(
     post,
     path = "/webhooks/{provider}/{tenant_id}",
     params(
         ("X-Connection-Id" = Option<String>, Header, description = "Optional connection ID to target"),
+        ("Authorization" = Option<String>, Header, description = "Bearer token for webhook verification (required for Zoho Cliq webhooks)"),
         ("X-Hub-Signature-256" = Option<String>, Header, description = "GitHub HMAC-SHA256 signature (required for GitHub webhooks)"),
         ("X-Slack-Signature" = Option<String>, Header, description = "Slack HMAC-SHA256 signature (required for Slack webhooks)"),
         ("X-Slack-Request-Timestamp" = Option<String>, Header, description = "Slack request timestamp (required for Slack webhooks)"),

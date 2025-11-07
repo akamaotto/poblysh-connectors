@@ -311,6 +311,31 @@ pub fn verify_webhook_signature(
                 })
             }
         }
+        "zoho-cliq" => {
+            let token = config.webhook_zoho_cliq_token.as_ref().ok_or_else(|| {
+                VerificationError::NotConfigured {
+                    provider: "zoho-cliq".to_string(),
+                }
+            })?;
+
+            // Enforce Authorization: Bearer <token> method
+            let provided_auth = headers
+                .get("authorization")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+
+            if let Some(bearer_token) = provided_auth.strip_prefix("Bearer ") {
+                if subtle::ConstantTimeEq::ct_eq(bearer_token.as_bytes(), token.as_bytes()).into() {
+                    Ok(())
+                } else {
+                    Err(VerificationError::VerificationFailed)
+                }
+            } else {
+                Err(VerificationError::MissingSignature {
+                    header: "Authorization (Bearer)".to_string(),
+                })
+            }
+        }
         _ => Err(VerificationError::UnsupportedProvider {
             provider: provider.to_string(),
         }),
@@ -341,6 +366,7 @@ pub async fn webhook_verification_middleware(
         "github" => config.webhook_github_secret.is_some(),
         "slack" => config.webhook_slack_signing_secret.is_some(),
         "jira" => config.webhook_jira_secret.is_some(),
+        "zoho-cliq" => config.webhook_zoho_cliq_token.is_some(),
         _ => false,
     };
 
@@ -580,5 +606,46 @@ mod tests {
         config.webhook_jira_secret = Some("test-secret-123".to_string());
 
         assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_err());
+    }
+
+    #[test]
+    fn test_zoho_cliq_token_verification_with_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer zoho-cliq-token-123".parse().unwrap());
+
+        let mut config = AppConfig::default();
+        config.webhook_zoho_cliq_token = Some("zoho-cliq-token-123".to_string());
+
+        assert!(verify_webhook_signature("zoho-cliq", b"{}", &headers, &config).is_ok());
+    }
+
+    #[test]
+    fn test_zoho_cliq_token_verification_invalid_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer wrong-token".parse().unwrap());
+
+        let mut config = AppConfig::default();
+        config.webhook_zoho_cliq_token = Some("zoho-cliq-token-123".to_string());
+
+        assert!(verify_webhook_signature("zoho-cliq", b"{}", &headers, &config).is_err());
+    }
+
+    #[test]
+    fn test_zoho_cliq_token_verification_missing() {
+        let headers = HeaderMap::new();
+        let mut config = AppConfig::default();
+        config.webhook_zoho_cliq_token = Some("zoho-cliq-token-123".to_string());
+
+        assert!(verify_webhook_signature("zoho-cliq", b"{}", &headers, &config).is_err());
+    }
+
+    #[test]
+    fn test_zoho_cliq_token_verification_not_configured() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer some-token".parse().unwrap());
+
+        let config = AppConfig::default(); // No token configured
+
+        assert!(verify_webhook_signature("zoho-cliq", b"{}", &headers, &config).is_err());
     }
 }

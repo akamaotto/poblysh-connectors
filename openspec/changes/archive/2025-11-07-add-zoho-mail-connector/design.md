@@ -34,11 +34,16 @@ Rationale:
 - Backoff and idempotent dedupe window provide reliability without complex state machines.
 
 ## OAuth2 and Region Handling
-- Accounts base URL varies by data center:
+- Accounts base URL varies by data center (driven by `POBLYSH_ZOHO_MAIL_DC`):
   - US: `https://accounts.zoho.com`
   - EU: `https://accounts.zoho.eu`
   - IN: `https://accounts.zoho.in`
-  - Others (e.g., AU, JP): follow Zoho docs; expose via `POBLYSH_ZOHO_DC` and resolver
+  - AU: `https://accounts.zoho.com.au`
+  - JP: `https://accounts.zoho.jp`
+  - CA: `https://accounts.zohocloud.ca`
+  - SA: `https://accounts.zoho.sa`
+  - UK: `https://accounts.zoho.uk`
+  - For any future/unknown DCs, resolve via Zoho's Multi-DC `serverinfo` endpoint and map to the corresponding Accounts and Mail API base URLs.
 - Authorization endpoint: `${ACCOUNTS_BASE}/oauth/v2/auth`
   - Params: `client_id`, `redirect_uri`, `scope`, `response_type=code`, `access_type=offline`, `state`
 - Token endpoint: `${ACCOUNTS_BASE}/oauth/v2/token`
@@ -46,24 +51,32 @@ Rationale:
 - Scopes (MVP): `ZohoMail.messages.READ` (confirm exact scope in research step)
 
 ## Polling and Dedupe Window
-- Cursor type: RFC3339 timestamp (UTC) representing last processed `lastModifiedTime`
-- Dedupe window: `window_secs` (default 300) to absorb late-arriving modifications
+- Cursor type: RFC3339 timestamp (UTC) representing last processed `lastModifiedTime`.
+- Dedupe window: `POBLYSH_ZOHO_MAIL_DEDUPE_WINDOW_SECS` (default 300) to absorb late-arriving modifications.
 - Query strategy:
-  - If the Email Messages API supports server-side `lastModifiedTime >= T` filters, use that with ascending sort by `lastModifiedTime`
-  - Else, use Search API with a time-range query (e.g., `after: <ts> before: <now>`), and filter client-side on `lastModifiedTime`
-- Dedupe key: `hash(message_id || lastModifiedTime)` to avoid duplicate Signals across overlapping windows
-- Advance cursor to the maximum `lastModifiedTime` observed to ensure monotonic progress
+  - If the Email Messages API supports server-side `lastModifiedTime >= T` or equivalent filters, use that with ascending sort by `lastModifiedTime`.
+  - Else, use Search API with a time-range query (e.g., `after: <ts> before: <now>`), and filter client-side on `lastModifiedTime`.
+- Dedupe key: `dedupe_key = hash(message_id || lastModifiedTime)`:
+  - The hash MUST be stored on emitted Signals (or underlying records) as `dedupe_key` to ensure idempotent processing across overlapping windows.
+  - Executors MUST treat `dedupe_key` as the stable idempotency key for Zoho Mail email signals.
+- Advance cursor to the maximum `lastModifiedTime` observed to ensure monotonic progress.
+
+### Deletion Event Dedupe Semantics
+- For deletion events where `lastModifiedTime` may not be available:
+  - Use `dedupe_key = hash(message_id || deletion_timestamp)` where `deletion_timestamp` is derived from either the deletion event time or current time
+  - If no deletion timestamp is available, use `dedupe_key = hash("DELETE:" || message_id)` to ensure uniqueness
+  - Cursor advancement: deletions should still influence cursor advancement using either the deletion timestamp if available, or the current cursor value to prevent regression
 
 ## HTTP and Retry Policy
-- Timeouts: default `POBLYSH_HTTP_TIMEOUT_SECS` (e.g., 15s)
+- Timeouts: default `POBLYSH_ZOHO_MAIL_HTTP_TIMEOUT_SECS` (e.g., 15s)
 - Retries: 3x with exponential backoff + jitter on 429/5xx; honor `Retry-After` if present
 - Token refresh: on 401, attempt one refresh; if still failing, return typed provider error
 
 ## Configuration
-- `POBLYSH_ZOHO_DC` — `us|eu|in|...` controls Accounts/API base URLs
+- `POBLYSH_ZOHO_MAIL_DC` — `us|eu|in|au|jp|ca|sa|uk|...` controls Accounts/API base URLs via a resolver aligned with Zoho Multi-DC server URLs
 - `POBLYSH_ZOHO_MAIL_SCOPES` — default `ZohoMail.messages.READ`
-- `POBLYSH_ZOHO_MAIL_POLL_WINDOW_SECS` — default `300`
-- `POBLYSH_HTTP_TIMEOUT_SECS` — default `15`
+- `POBLYSH_ZOHO_MAIL_DEDUPE_WINDOW_SECS` — default `300`
+- `POBLYSH_ZOHO_MAIL_HTTP_TIMEOUT_SECS` — default `15`
 
 ## Module Structure and Integration
 - `src/connectors/zoho_mail.rs` implements `Connector`
@@ -75,7 +88,7 @@ Rationale:
 
 ## Normalized Signals (MVP)
 - `email_received` — first time a message is seen (or status indicates newly received)
-- `email_updated` — message metadata/labels/folder changed; include `last_modified` (mapped from provider `lastModifiedTime`)
+- `email_updated` — message metadata/labels/folder changed; timestamp derived from provider `lastModifiedTime`
 - `email_deleted` — message deleted; include identifiers and occurred_at
 Fields: `{ message_id, thread_id?, folder_id?, from, to, subject, occurred_at, raw }`
 

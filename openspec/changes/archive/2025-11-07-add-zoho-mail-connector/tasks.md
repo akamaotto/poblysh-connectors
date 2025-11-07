@@ -1,9 +1,9 @@
 ## 1. Implementation
-- [ ] 1.1 Add provider metadata and register `zoho-mail` in provider registry
-- [ ] 1.2 Implement `src/connectors/zoho_mail.rs` with `Connector` trait methods
+- [x] 1.1 Add provider metadata and register `zoho-mail` in provider registry
+- [x] 1.2 Implement `src/connectors/zoho_mail.rs` with `Connector` trait methods
 - [ ] 1.3 Implement OAuth `authorize` (region-aware Accounts URL) and `exchange_token`/`refresh_token`
 - [ ] 1.4 Implement `sync` polling with time-based cursor and dedupe window
-- [ ] 1.5 Promote `reqwest` to runtime deps and add `oauth2`, `backoff` crates
+- [x] 1.5 Promote `reqwest` to runtime deps and add `oauth2`, `backoff` crates
 - [ ] 1.6 Map Zoho message changes to Signals: `email_received`, `email_updated`, `email_deleted`
 - [ ] 1.7 Populate `dedupe_key` using `hash(message_id || lastModifiedTime)`
 
