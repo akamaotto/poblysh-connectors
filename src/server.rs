@@ -207,7 +207,7 @@ pub async fn run_server(
     let shared_db = Arc::new(db);
 
     // Initialize the connector registry
-    Registry::initialize();
+    Registry::initialize(shared_config.as_ref());
     println!("Connector registry initialized");
 
     // Create crypto key from config

@@ -261,7 +261,6 @@ mod critical_tests {
         // Add Jira config and should succeed
         config.jira_client_id = Some("test-jira-id".to_string());
         config.jira_client_secret = Some("test-jira-secret".to_string());
-        config.webhook_jira_secret = Some("test-jira-webhook-secret".to_string());
         assert!(config.validate().is_ok());
     }
 
@@ -280,7 +279,6 @@ mod critical_tests {
         // Add Jira config and should succeed
         config.jira_client_id = Some("test-jira-id".to_string());
         config.jira_client_secret = Some("test-jira-secret".to_string());
-        config.webhook_jira_secret = Some("test-jira-webhook-secret".to_string());
         assert!(config.validate().is_ok());
     }
 }

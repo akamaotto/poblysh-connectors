@@ -38,12 +38,15 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 29) add-zoho-cliq-connector — Webhook ingest, message signals.
 30) add-zoho-mail-connector — Polling + dedupe window.
 
-31) update-api-pagination-and-cursors — Stable ordering, `next_cursor`.
-32) add-normalization-fixtures — Golden tests for `Signal.kind` mapping.
-33) add-local-run-scripts — Makefile/justfile tasks (no Docker).
-34) add-e2e-smoke-tests-local — Boot API, hit core endpoints against local DB.
-35) docs-polish-and-runbooks-local — Update PRD/Tech Spec/API; local crypto rotation runbook.
+31) add-mail-spam-filtering — Shared spam detection/filter traits for Gmail/Zoho connectors.
+32) add-weak-signal-engine — Cross-connector pipeline turning normalized Signals into grounded PR opportunities.
 
-36) add-dockerization-post-mvp — Containerize service and Postgres for deployment prep.
+33) update-api-pagination-and-cursors — Stable ordering, `next_cursor`.
+34) add-normalization-fixtures — Golden tests for `Signal.kind` mapping.
+35) add-local-run-scripts — Makefile/justfile tasks (no Docker).
+36) add-e2e-smoke-tests-local — Boot API, hit core endpoints against local DB.
+37) docs-polish-and-runbooks-local — Update PRD/Tech Spec/API; local crypto rotation runbook.
+
+38) add-dockerization-post-mvp — Containerize service and Postgres for deployment prep.
 
 Note: Dockerization is intentionally scheduled late (post-MVP) per project preference.

@@ -250,6 +250,18 @@ export POBLYSH_API__REQUEST_TIMEOUT=60
 
 # Profile
 export POBLYSH_PROFILE=prod
+
+### Jira Connector Environment Variables
+
+The Jira connector reads its OAuth and webhook settings from the following variables (either plain or prefixed with `POBLYSH_`):
+
+- `JIRA_CLIENT_ID` / `POBLYSH_JIRA_CLIENT_ID` (**required outside `local`/`test`**): Atlassian OAuth client identifier.
+- `JIRA_CLIENT_SECRET` / `POBLYSH_JIRA_CLIENT_SECRET` (**required outside `local`/`test`**): Atlassian OAuth client secret.
+- `JIRA_OAUTH_BASE` / `POBLYSH_JIRA_OAUTH_BASE` (optional): Overrides the OAuth authorize and token base URL. Defaults to `https://auth.atlassian.com`.
+- `JIRA_API_BASE` / `POBLYSH_JIRA_API_BASE` (optional): Overrides the Atlassian REST API host. Defaults to `https://api.atlassian.com`.
+- `WEBHOOK_JIRA_SECRET` / `POBLYSH_WEBHOOK_JIRA_SECRET` (optional): Shared secret used to protect public Jira webhooks. When unset, public webhook routes skip verification in `local`/`test` profiles; the protected operator route still accepts events. Requests must present the secret via the `Authorization: Bearer <secret>` header.
+
+Note: The loader no longer injects placeholder Jira credentials for any profile. Set `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET` explicitly when the Jira connector is enabled.
 ```
 
 ## Command-Line Arguments

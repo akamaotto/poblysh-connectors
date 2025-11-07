@@ -19,10 +19,11 @@ async fn test_sync_executor_basic_functionality() -> Result<()> {
 
     // Seed providers and initialize registry
     seed_providers(&db).await?;
-    Registry::initialize();
+    let app_config = connectors::config::AppConfig::default();
+    Registry::initialize(&app_config);
 
     // Create executor
-    let config = ExecutorConfig::default();
+    let executor_config = ExecutorConfig::default();
     let rate_limit_policy = RateLimitPolicyConfig::default();
     let registry = Registry::global().read().unwrap().clone();
 
@@ -33,7 +34,7 @@ async fn test_sync_executor_basic_functionality() -> Result<()> {
 
     // Create TokenRefreshService
     let token_refresh_service = std::sync::Arc::new(TokenRefreshService::new(
-        std::sync::Arc::new(connectors::config::AppConfig::default()),
+        std::sync::Arc::new(app_config.clone()),
         std::sync::Arc::new(db.clone()),
         std::sync::Arc::new(connection_repo),
         registry.clone(),
@@ -42,7 +43,7 @@ async fn test_sync_executor_basic_functionality() -> Result<()> {
     let executor = SyncExecutor::new(
         db.clone(),
         registry,
-        config,
+        executor_config,
         rate_limit_policy,
         token_refresh_service,
     );

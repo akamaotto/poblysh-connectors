@@ -229,8 +229,8 @@ mod tests {
             ))
             .with_state({
                 let db = sea_orm::DatabaseConnection::default();
-                let crypto_key =
-                    crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
+                let crypto_key = crate::crypto::CryptoKey::new(vec![0u8; 32])
+                    .expect("Failed to create test crypto key");
 
                 // Create required dependencies for TokenRefreshService
                 let connection_repo = crate::repositories::ConnectionRepository::new(
@@ -239,14 +239,20 @@ mod tests {
                 );
 
                 // Create TokenRefreshService
-                let token_refresh_service = std::sync::Arc::new(crate::token_refresh::TokenRefreshService::new(
-                    config.clone(),
-                    std::sync::Arc::new(db.clone()),
-                    std::sync::Arc::new(connection_repo),
-                    crate::connectors::registry::Registry::new(),
-                ));
+                let token_refresh_service =
+                    std::sync::Arc::new(crate::token_refresh::TokenRefreshService::new(
+                        config.clone(),
+                        std::sync::Arc::new(db.clone()),
+                        std::sync::Arc::new(connection_repo),
+                        crate::connectors::registry::Registry::new(),
+                    ));
 
-                AppState { config, db, crypto_key, token_refresh_service }
+                AppState {
+                    config,
+                    db,
+                    crypto_key,
+                    token_refresh_service,
+                }
             })
             .oneshot(request)
             .await

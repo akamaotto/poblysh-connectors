@@ -55,7 +55,7 @@ async fn spawn_test_app(config: AppConfig) -> (String, Arc<DatabaseConnection>, 
     let db = Arc::new(test_utils::setup_test_db().await.unwrap());
 
     // Initialize the connector registry (required for OAuth callback tests)
-    connectors::connectors::Registry::initialize();
+    connectors::connectors::Registry::initialize(&config);
 
     // Create app state
     let crypto_key = connectors::crypto::CryptoKey::new(vec![0u8; 32])

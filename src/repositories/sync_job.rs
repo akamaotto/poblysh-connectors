@@ -96,6 +96,55 @@ impl SyncJobRepository {
         Ok(result)
     }
 
+    /// Enqueue a new regular sync job
+    pub async fn enqueue_sync_job(
+        &self,
+        tenant_id: Uuid,
+        provider_slug: &str,
+        connection_id: Uuid,
+        cursor: Option<JsonValue>,
+    ) -> Result<Model, ApiError> {
+        let now = Utc::now().fixed_offset();
+
+        let job = ActiveModel {
+            id: Set(Uuid::new_v4()),
+            tenant_id: Set(tenant_id),
+            provider_slug: Set(provider_slug.to_string()),
+            connection_id: Set(connection_id),
+            job_type: Set("sync".to_string()),
+            status: Set("queued".to_string()),
+            priority: Set(10), // Higher priority for triggered sync jobs
+            attempts: Set(0),
+            scheduled_at: Set(now),
+            retry_after: Set(None),
+            started_at: Set(None),
+            finished_at: Set(None),
+            cursor: Set(cursor),
+            error: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+
+        let result = job.insert(&self.db).await.map_err(|e| {
+            tracing::error!("Failed to create sync job: {}", e);
+            ApiError::new(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                "Failed to create sync job",
+            )
+        })?;
+
+        tracing::info!(
+            tenant_id = %tenant_id,
+            provider_slug = %result.provider_slug,
+            connection_id = %connection_id,
+            job_id = %result.id,
+            "Sync job enqueued"
+        );
+
+        Ok(result)
+    }
+
     /// Find a sync job by ID, ensuring it belongs to the specified tenant
     pub async fn find_by_tenant(
         &self,

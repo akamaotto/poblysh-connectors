@@ -249,26 +249,13 @@ pub async fn oauth_callback(
 
     // Always consume the state first to prevent replay attacks, even if we later reject the request
     let oauth_state_repo = OAuthStateRepository::new(Arc::new(state.db.clone()));
-    println!(
-        "Looking for OAuth state: provider={}, state={}",
-        provider, state_token
-    );
     let oauth_state = match oauth_state_repo
         .find_and_consume_by_provider_state(&provider, &state_token)
         .await
     {
-        Ok(Some(oauth_state)) => {
-            println!(
-                "Found OAuth state: tenant_id={}, provider={}",
-                oauth_state.tenant_id, oauth_state.provider
-            );
-            oauth_state
-        }
+        Ok(Some(oauth_state)) => oauth_state,
         Ok(None) => {
-            println!(
-                "OAuth state not found for provider={}, state={}",
-                provider, state_token
-            );
+            tracing::warn!(provider = %provider, "OAuth state not found or already consumed");
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "VALIDATION_FAILED",
@@ -391,11 +378,11 @@ pub async fn oauth_callback(
 
 /// Generate a cryptographically secure random state token
 fn generate_secure_state() -> String {
-    use rand::Rng;
+    use rand::RngCore;
 
-    // Generate 32 bytes of random data
+    // Generate 32 bytes of OS-backed random data
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill(&mut bytes);
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
 
     // Encode as base64 URL-safe string
     base64_url::encode(&bytes)
@@ -722,8 +709,8 @@ mod tests {
         use crate::config::AppConfig;
         use sea_orm::{Database, DatabaseConnection};
 
-        // Initialize registry
-        crate::connectors::registry::Registry::initialize();
+        let config = AppConfig::default();
+        crate::connectors::registry::Registry::initialize(&config);
 
         // Use unique file-based SQLite for testing to avoid migration conflicts
         let test_db_name = format!(
@@ -862,7 +849,6 @@ mod tests {
             .await
             .expect("Failed to create example provider");
 
-        let config = AppConfig::default();
         crate::server::create_test_app_state(config, db)
     }
 
@@ -871,7 +857,8 @@ mod tests {
         // Test the key components of OAuth flow without database dependencies
 
         // Initialize registry to make sure it has providers
-        crate::connectors::registry::Registry::initialize();
+        let config = crate::config::AppConfig::default();
+        crate::connectors::registry::Registry::initialize(&config);
 
         // Test 1: Verify that example provider exists and supports OAuth2
         let result = crate::connectors::registry::Registry::get_provider_metadata("example");
@@ -1062,7 +1049,8 @@ mod tests {
         // Test unknown provider scenario using registry directly
 
         // Initialize registry
-        crate::connectors::registry::Registry::initialize();
+        let config = crate::config::AppConfig::default();
+        crate::connectors::registry::Registry::initialize(&config);
 
         // Test 1: Verify unknown provider returns NOT_FOUND from registry
         let result =
@@ -1103,7 +1091,8 @@ mod tests {
         // Test non-OAuth provider scenario using registry directly
 
         // Initialize registry
-        crate::connectors::registry::Registry::initialize();
+        let config = crate::config::AppConfig::default();
+        crate::connectors::registry::Registry::initialize(&config);
 
         // Test 1: Find a provider that exists but is not OAuth2
         // For this test, we'll check if there are any non-OAuth providers in the registry

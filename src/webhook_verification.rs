@@ -13,11 +13,40 @@ use axum::{
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tracing::{debug, error, info, warn};
 
 use crate::config::AppConfig;
 
 type HmacSha256 = Hmac<Sha256>;
+
+// Simple in-memory fixed-window rate limiter per (provider, tenant_id)
+// Window unit: seconds epoch rounded to minute
+const WEBHOOK_RL_PER_MINUTE: u32 = 300; // default limit per provider/tenant per minute
+static WEBHOOK_RL: OnceLock<Mutex<HashMap<String, (u64, u32)>>> = OnceLock::new();
+
+fn is_rate_limited(provider: &str, tenant_id: &str) -> bool {
+    let map = WEBHOOK_RL.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = format!("{}:{}", provider, tenant_id);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let window = now_secs / 60; // minute bucket
+    let mut guard = map.lock().unwrap();
+    let entry = guard.entry(key).or_insert((window, 0));
+    if entry.0 != window {
+        // new window
+        *entry = (window, 0);
+    }
+    if entry.1 >= WEBHOOK_RL_PER_MINUTE {
+        true
+    } else {
+        entry.1 += 1;
+        false
+    }
+}
 
 /// Errors that can occur during webhook signature verification
 #[derive(Debug, thiserror::Error)]
@@ -258,30 +287,13 @@ pub fn verify_webhook_signature(
             )
         }
         "jira" => {
-            let secret = config
-                .webhook_jira_secret
-                .as_ref()
-                .ok_or_else(|| VerificationError::NotConfigured {
+            let secret = config.webhook_jira_secret.as_ref().ok_or_else(|| {
+                VerificationError::NotConfigured {
                     provider: "jira".to_string(),
-                })?;
-
-            // Accept either custom shared secret header or Authorization Bearer secret
-            let provided_secret_header = headers
-                .get("x-webhook-secret")
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("");
-
-            if !provided_secret_header.is_empty() {
-                if subtle::ConstantTimeEq::ct_eq(provided_secret_header.as_bytes(), secret.as_bytes())
-                    .into()
-                {
-                    return Ok(());
-                } else {
-                    return Err(VerificationError::VerificationFailed);
                 }
-            }
+            })?;
 
-            // Fallback to Authorization: Bearer <secret>
+            // Enforce a single method: Authorization: Bearer <secret>
             let provided_auth = headers
                 .get("authorization")
                 .and_then(|h| h.to_str().ok())
@@ -293,17 +305,9 @@ pub fn verify_webhook_signature(
                 } else {
                     Err(VerificationError::VerificationFailed)
                 }
-            } else if !provided_auth.is_empty() {
-                // No Bearer prefix; compare full auth value
-                if subtle::ConstantTimeEq::ct_eq(provided_auth.as_bytes(), secret.as_bytes()).into()
-                {
-                    Ok(())
-                } else {
-                    Err(VerificationError::VerificationFailed)
-                }
             } else {
                 Err(VerificationError::MissingSignature {
-                    header: "X-Webhook-Secret or Authorization".to_string(),
+                    header: "Authorization (Bearer)".to_string(),
                 })
             }
         }
@@ -330,6 +334,7 @@ pub async fn webhook_verification_middleware(
     // Extract provider and tenant_id from path
     let path_parts: Vec<&str> = path.split('/').collect();
     let provider = path_parts[2];
+    let tenant_id = path_parts[3];
 
     // Check if verification is configured for this provider
     let verification_enabled = match provider {
@@ -345,8 +350,11 @@ pub async fn webhook_verification_middleware(
             // Allow in dev/test without verification
             return Ok(next.run(request).await);
         } else {
-            warn!(provider = %provider, "Webhook verification not configured for provider");
-            return Err(StatusCode::UNAUTHORIZED);
+            warn!(
+                provider = %provider,
+                "Jira webhook secret not configured; skipping verification"
+            );
+            return Ok(next.run(request).await);
         }
     }
 
@@ -356,6 +364,12 @@ pub async fn webhook_verification_middleware(
             "Webhook verification not configured for provider"
         );
         return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Basic per-tenant/provider rate limiting (fixed window per minute)
+    if is_rate_limited(provider, tenant_id) {
+        warn!(provider = %provider, tenant_id = %tenant_id, "Webhook rate limit exceeded");
+        return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
     // Get the request body bytes for signature verification
@@ -537,14 +551,15 @@ mod tests {
     }
 
     #[test]
-    fn test_jira_secret_verification_with_header() {
+    fn test_jira_secret_header_no_longer_accepted() {
         let mut headers = HeaderMap::new();
         headers.insert("X-Webhook-Secret", "test-secret-123".parse().unwrap());
 
         let mut config = AppConfig::default();
         config.webhook_jira_secret = Some("test-secret-123".to_string());
 
-        assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_ok());
+        // Only Authorization: Bearer is accepted now
+        assert!(verify_webhook_signature("jira", b"{}", &headers, &config).is_err());
     }
 
     #[test]

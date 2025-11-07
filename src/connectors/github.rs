@@ -6,7 +6,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use sea_orm::RelationTrait;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::Arc;
@@ -108,28 +107,26 @@ impl GitHubConnector {
         let mut api_base_url = std::env::var("GITHUB_API_BASE")
             .unwrap_or_else(|_| "https://api.github.com".to_string());
         let default_oauth_base = "https://github.com".to_string();
-        let mut token_base_url = std::env::var("GITHUB_OAUTH_BASE").unwrap_or_else(|_| default_oauth_base.clone());
+        let mut token_base_url =
+            std::env::var("GITHUB_OAUTH_BASE").unwrap_or_else(|_| default_oauth_base.clone());
         let authorize_base_url = default_oauth_base.clone();
 
         // Test-friendly behavior: if redirect_uri points to a local mock server and
         // no explicit base URLs are provided, route API and OAuth calls to that server.
-        if let Ok(cb_url) = Url::parse(&redirect_uri) {
-            if (cb_url.host_str() == Some("127.0.0.1") || cb_url.host_str() == Some("localhost"))
-                && token_base_url == default_oauth_base
-                && api_base_url == "https://api.github.com"
-            {
-                let origin = format!("{}://{}{}",
-                    cb_url.scheme(),
-                    cb_url.host_str().unwrap_or("127.0.0.1"),
-                    cb_url
-                        .port()
-                        .map(|p| format!(":{}", p))
-                        .unwrap_or_default()
-                );
-                // Keep authorize on github.com for user redirection shape assertions
-                token_base_url = origin.clone();
-                api_base_url = origin;
-            }
+        if let Ok(cb_url) = Url::parse(&redirect_uri)
+            && (cb_url.host_str() == Some("127.0.0.1") || cb_url.host_str() == Some("localhost"))
+            && token_base_url == default_oauth_base
+            && api_base_url == "https://api.github.com"
+        {
+            let origin = format!(
+                "{}://{}{}",
+                cb_url.scheme(),
+                cb_url.host_str().unwrap_or("127.0.0.1"),
+                cb_url.port().map(|p| format!(":{}", p)).unwrap_or_default()
+            );
+            // Keep authorize on github.com for user redirection shape assertions
+            token_base_url = origin.clone();
+            api_base_url = origin;
         }
 
         Self {
@@ -161,14 +158,18 @@ impl GitHubConnector {
         let mut token_base_url = authorize_base_url.clone();
 
         // Align token base with API base when pointing to a mock server
-        if let Ok(api_url) = Url::parse(&api_base_url) {
-            if api_url.host_str() == Some("127.0.0.1") || api_url.host_str() == Some("localhost") {
-                token_base_url = format!("{}://{}{}",
-                    api_url.scheme(),
-                    api_url.host_str().unwrap_or("127.0.0.1"),
-                    api_url.port().map(|p| format!(":{}", p)).unwrap_or_default()
-                );
-            }
+        if let Ok(api_url) = Url::parse(&api_base_url)
+            && (api_url.host_str() == Some("127.0.0.1") || api_url.host_str() == Some("localhost"))
+        {
+            token_base_url = format!(
+                "{}://{}{}",
+                api_url.scheme(),
+                api_url.host_str().unwrap_or("127.0.0.1"),
+                api_url
+                    .port()
+                    .map(|p| format!(":{}", p))
+                    .unwrap_or_default()
+            );
         }
 
         Self {
@@ -398,10 +399,10 @@ impl GitHubConnector {
         } else if response.status() == 401 {
             // Authentication error - return structured error for auth recovery
             error!("GitHub API authentication failed: 401 Unauthorized");
-            Err(SyncError::unauthorized(
-                "GitHub authentication failed - token may be expired",
+            Err(
+                SyncError::unauthorized("GitHub authentication failed - token may be expired")
+                    .into(),
             )
-            .into())
         } else if response.status() == 403 {
             // Check if this is a rate limit (should have been caught above) or permission error
             if response.headers().get("X-RateLimit-Remaining").is_some() {
@@ -553,10 +554,10 @@ impl GitHubConnector {
         } else if response.status() == 401 {
             // Authentication error - return structured error for auth recovery
             error!("GitHub API authentication failed: 401 Unauthorized");
-            Err(SyncError::unauthorized(
-                "GitHub authentication failed - token may be expired",
+            Err(
+                SyncError::unauthorized("GitHub authentication failed - token may be expired")
+                    .into(),
             )
-            .into())
         } else if response.status() == 403 {
             // Check if this is a rate limit (should have been caught above) or permission error
             if response.headers().get("X-RateLimit-Remaining").is_some() {
@@ -1104,34 +1105,34 @@ impl Connector for GitHubConnector {
         }
 
         // In test environments using a local mock server, ensure at least one PR signal is generated
-        if total_prs == 0 && since.is_none() {
-            if let Ok(url) = Url::parse(&self.api_config.base_url) {
-                if matches!(url.host_str(), Some("127.0.0.1") | Some("localhost")) {
-                    let now = Utc::now();
-                    let signal = Signal {
-                        id: Uuid::new_v4(),
-                        tenant_id: params.connection.tenant_id,
-                        provider_slug: "github".to_string(),
-                        connection_id: params.connection.id,
-                        kind: "pr_updated".to_string(),
-                        occurred_at: now.into(),
-                        received_at: DateTime::from(now),
-                        payload: serde_json::json!({
-                            "id": 999999,
-                            "number": 1,
-                            "title": "Test PR",
-                            "state": "open",
-                            "created_at": now,
-                            "user": {"id": 1, "login": "testuser"},
-                            "labels": []
-                        }),
-                        dedupe_key: Some("github_pr_999999".to_string()),
-                        created_at: DateTime::from(now),
-                        updated_at: DateTime::from(now),
-                    };
-                    all_signals.push(signal);
-                }
-            }
+        if total_prs == 0
+            && since.is_none()
+            && let Ok(url) = Url::parse(&self.api_config.base_url)
+            && matches!(url.host_str(), Some("127.0.0.1") | Some("localhost"))
+        {
+            let now = Utc::now();
+            let signal = Signal {
+                id: Uuid::new_v4(),
+                tenant_id: params.connection.tenant_id,
+                provider_slug: "github".to_string(),
+                connection_id: params.connection.id,
+                kind: "pr_updated".to_string(),
+                occurred_at: now.into(),
+                received_at: DateTime::from(now),
+                payload: serde_json::json!({
+                    "id": 999999,
+                    "number": 1,
+                    "title": "Test PR",
+                    "state": "open",
+                    "created_at": now,
+                    "user": {"id": 1, "login": "testuser"},
+                    "labels": []
+                }),
+                dedupe_key: Some("github_pr_999999".to_string()),
+                created_at: DateTime::from(now),
+                updated_at: DateTime::from(now),
+            };
+            all_signals.push(signal);
         }
 
         // Determine next cursor and pagination
@@ -1215,10 +1216,9 @@ impl Connector for GitHubConnector {
                     Ok(None) => {
                         // Fallback: pick any connection for the tenant
                         match ConnectionEntity::find()
-                            .filter(
-                                Condition::all()
-                                    .add(crate::models::connection::Column::TenantId.eq(params.tenant_id)),
-                            )
+                            .filter(Condition::all().add(
+                                crate::models::connection::Column::TenantId.eq(params.tenant_id),
+                            ))
                             .select_only()
                             .column(crate::models::connection::Column::Id)
                             .into_tuple::<Uuid>()
@@ -1309,15 +1309,15 @@ impl Connector for GitHubConnector {
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
                         kind: kind.to_string(),
                         occurred_at: occurred_at.into(),
-                            received_at: now,
+                        received_at: now,
                         payload: issue.clone(),
                         dedupe_key: Some(format!(
                             "github_webhook_{}_{}",
                             "issue",
                             issue.get("id").and_then(|v| v.as_u64()).unwrap_or(0)
                         )),
-                            created_at: now,
-                            updated_at: now,
+                        created_at: now,
+                        updated_at: now,
                     };
                     signals.push(signal);
                 }
@@ -1360,15 +1360,15 @@ impl Connector for GitHubConnector {
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
                         kind: kind.to_string(),
                         occurred_at: occurred_at.into(),
-                            received_at: now,
+                        received_at: now,
                         payload: pull_request.clone(),
                         dedupe_key: Some(format!(
                             "github_webhook_{}_{}",
                             "pr",
                             pull_request.get("id").and_then(|v| v.as_u64()).unwrap_or(0)
                         )),
-                            created_at: now,
-                            updated_at: now,
+                        created_at: now,
+                        updated_at: now,
                     };
                     signals.push(signal);
                 }
@@ -1392,15 +1392,15 @@ impl Connector for GitHubConnector {
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
                         kind: kind.to_string(),
                         occurred_at: occurred_at.into(),
-                            received_at: now,
+                        received_at: now,
                         payload: comment.clone(),
                         dedupe_key: Some(format!(
                             "github_webhook_{}_{}",
                             "comment",
                             comment.get("id").and_then(|v| v.as_u64()).unwrap_or(0)
                         )),
-                            created_at: now,
-                            updated_at: now,
+                        created_at: now,
+                        updated_at: now,
                     };
                     signals.push(signal);
                 }

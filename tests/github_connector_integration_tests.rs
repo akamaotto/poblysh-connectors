@@ -147,6 +147,7 @@ async fn test_github_webhook_processing() {
         payload: issue_webhook,
         tenant_id,
         db: Some(db.clone()),
+        auth_header: None,
     };
 
     let signals = connector.handle_webhook(webhook_params).await.unwrap();
@@ -179,6 +180,7 @@ async fn test_github_webhook_processing() {
         payload: pr_webhook,
         tenant_id,
         db: Some(db.clone()),
+        auth_header: None,
     };
 
     let signals = connector.handle_webhook(webhook_params).await.unwrap();
@@ -195,6 +197,7 @@ async fn test_github_webhook_processing() {
         payload: invalid_webhook,
         tenant_id,
         db: Some(db),
+        auth_header: None,
     };
 
     let signals = connector.handle_webhook(webhook_params).await.unwrap();

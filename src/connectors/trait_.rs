@@ -337,6 +337,7 @@ pub struct WebhookParams {
     pub payload: serde_json::Value,
     pub tenant_id: Uuid,
     pub db: Option<DatabaseConnection>,
+    pub auth_header: Option<String>,
 }
 
 #[async_trait]

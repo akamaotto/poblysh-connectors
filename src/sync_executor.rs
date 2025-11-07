@@ -4,6 +4,7 @@
 //! connectors, persisting signals, and managing cursor advancement with backoff
 //! and retry logic.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use metrics::{counter, histogram};
 use rand::{Rng, thread_rng};
@@ -390,22 +391,83 @@ impl SyncExecutor {
     ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         // Extract webhook context from cursor
         let webhook_payload = cursor.and_then(|c| c.get("webhook_payload").cloned());
-        let _webhook_headers = cursor.and_then(|c| c.get("webhook_headers").cloned());
+        let webhook_headers = cursor.and_then(|c| c.get("webhook_headers").cloned());
 
         let payload = match webhook_payload {
-            Some(p) => p,
+            Some(ref p) => p.clone(),
             None => serde_json::Value::Object(serde_json::Map::new()), // Empty payload if not found
         };
 
-        // Create webhook params (headers are included in payload as per WebhookParams structure)
+        // Extract Authorization header from webhook headers for OIDC verification
+        let auth_header = webhook_headers
+            .as_ref()
+            .and_then(|headers| headers.get("authorization"))
+            .and_then(|auth| auth.as_str())
+            .map(|s| s.to_string());
+
+        // Create webhook params
         let webhook_params = WebhookParams {
             payload,
             tenant_id: connection.tenant_id,
             db: Some(self.db.as_ref().clone()),
+            auth_header,
         };
 
         // First attempt
-        match connector.handle_webhook(webhook_params.clone()).await {
+        let webhook_result = connector.handle_webhook(webhook_params.clone()).await;
+
+        // For Gmail webhooks, we need to trigger an incremental sync job after processing the webhook
+        if connection.provider_slug == "gmail" && webhook_result.is_ok() {
+            // Extract history ID from the webhook payload for cursor
+            let history_id = webhook_payload
+                .as_ref()
+                .and_then(|payload| payload.get("data").cloned())
+                .and_then(|data| data.as_str().map(|s| s.to_owned()))
+                .and_then(|data_str| STANDARD.decode(data_str).ok())
+                .and_then(|decoded_vec| {
+                    serde_json::from_slice::<serde_json::Value>(&decoded_vec).ok()
+                })
+                .and_then(|gmail_data| gmail_data.get("historyId").cloned())
+                .and_then(|history_id| history_id.as_u64());
+
+            if let Some(history_id) = history_id {
+                info!(
+                    connection_id = %connection_id,
+                    history_id = history_id,
+                    "Gmail webhook processed, triggering incremental sync job"
+                );
+
+                // Create a cursor with the history ID to start incremental sync from this point
+                let sync_cursor = Some(serde_json::json!({
+                    "history_id": history_id
+                }));
+
+                // Enqueue a follow-up sync job for incremental sync
+                let sync_job_repo = crate::repositories::SyncJobRepository::new((*self.db).clone());
+                if let Err(e) = sync_job_repo
+                    .enqueue_sync_job(
+                        connection.tenant_id,
+                        &connection.provider_slug,
+                        connection.id,
+                        sync_cursor,
+                    )
+                    .await
+                {
+                    error!(
+                        connection_id = %connection_id,
+                        error = ?e,
+                        "Failed to enqueue follow-up sync job for Gmail"
+                    );
+                }
+            } else {
+                warn!(
+                    connection_id = %connection_id,
+                    "Gmail webhook processed but could not extract history ID for sync"
+                );
+            }
+        }
+
+        match webhook_result {
             Ok(signals) => {
                 // Convert webhook signals to sync result format
                 Ok(SyncResult {
@@ -416,13 +478,10 @@ impl SyncExecutor {
             }
             Err(e) => {
                 // Check if this is an unauthorized error that might be resolved by token refresh
-                let sync_error = e
-                    .downcast_ref::<SyncError>()
-                    .cloned()
-                    .or_else(|| {
-                        e.downcast_ref::<ConnectorError>()
-                            .map(|connector_err| SyncError::from(connector_err.clone()))
-                    });
+                let sync_error = e.downcast_ref::<SyncError>().cloned().or_else(|| {
+                    e.downcast_ref::<ConnectorError>()
+                        .map(|connector_err| SyncError::from(connector_err.clone()))
+                });
 
                 if let Some(sync_error) = sync_error {
                     if sync_error.kind == SyncErrorKind::Unauthorized {
@@ -501,13 +560,10 @@ impl SyncExecutor {
             Ok(result) => Ok(result),
             Err(e) => {
                 // Check if this is an unauthorized error that might be resolved by token refresh
-                let sync_error = e
-                    .downcast_ref::<SyncError>()
-                    .cloned()
-                    .or_else(|| {
-                        e.downcast_ref::<ConnectorError>()
-                            .map(|connector_err| SyncError::from(connector_err.clone()))
-                    });
+                let sync_error = e.downcast_ref::<SyncError>().cloned().or_else(|| {
+                    e.downcast_ref::<ConnectorError>()
+                        .map(|connector_err| SyncError::from(connector_err.clone()))
+                });
 
                 if let Some(sync_err) = sync_error
                     && matches!(sync_err.kind, SyncErrorKind::Unauthorized)

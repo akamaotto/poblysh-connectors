@@ -189,6 +189,92 @@ fn parse_webhook_body_from_bytes(bytes: &[u8]) -> Option<JsonValue> {
     serde_json::from_slice(bytes).ok()
 }
 
+/// Verify Gmail webhook OIDC token synchronously
+fn verify_gmail_webhook_oidc(
+    headers: &HeaderMap,
+    config: &crate::config::AppConfig,
+    _body_bytes: &[u8],
+) -> Result<(), ApiError> {
+    // For Gmail provider, OIDC verification is mandatory
+    let (audience, issuers) = match (&config.pubsub_oidc_audience, &config.pubsub_oidc_issuers) {
+        (Some(audience), Some(issuers)) => (audience, issuers),
+        _ => {
+            // OIDC verification is required for Gmail
+            let missing_fields = match (&config.pubsub_oidc_audience, &config.pubsub_oidc_issuers) {
+                (None, None) => "both POBLYSH_PUBSUB_OIDC_AUDIENCE and POBLYSH_PUBSUB_OIDC_ISSUERS",
+                (None, Some(_)) => "POBLYSH_PUBSUB_OIDC_AUDIENCE",
+                (Some(_), None) => "POBLYSH_PUBSUB_OIDC_ISSUERS",
+                _ => unreachable!(),
+            };
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_SERVER_ERROR",
+                &format!(
+                    "Gmail OIDC verification is required but missing configuration: {}",
+                    missing_fields
+                ),
+            ));
+        }
+    };
+
+    // Extract Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Missing Authorization header for Gmail webhook",
+            )
+        })?;
+
+    // Verify JWT synchronously using Gmail connector's OIDC verification
+    let connector = crate::connectors::gmail::GmailConnector::new_with_oidc(
+        "dummy-client-id".to_string(),
+        "dummy-client-secret".to_string(),
+        Some(audience.clone()),
+        Some(issuers.clone()),
+    );
+
+    // Use tokio runtime to verify the token synchronously
+    let rt = tokio::runtime::Handle::current();
+    rt.block_on(async { connector.verify_oidc_token(Some(auth_header)).await })
+        .map_err(|e| {
+            error!(error = ?e, "Gmail OIDC token verification failed");
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                &format!("OIDC token verification failed: {}", e),
+            )
+        })?;
+
+    Ok(())
+}
+
+/// Validate Gmail webhook body size
+fn validate_gmail_webhook_body_size(
+    body_bytes: &[u8],
+    config: &crate::config::AppConfig,
+) -> Result<(), ApiError> {
+    let max_size_kb = config.pubsub_max_body_kb;
+    let max_size_bytes = max_size_kb * 1024;
+
+    if body_bytes.len() > max_size_bytes {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "PAYLOAD_TOO_LARGE",
+            &format!(
+                "Webhook body size {} bytes exceeds maximum allowed size {} KB",
+                body_bytes.len(),
+                max_size_kb
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Accept webhook from external provider
 ///
 /// This endpoint receives webhook callbacks from external providers. For MVP,
@@ -249,8 +335,8 @@ pub async fn ingest_webhook(
     }
 
     // Filter out sensitive headers before persisting in job cursor
-    let sensitive_headers = std::collections::HashSet::from([
-        "authorization",
+    // Note: For Gmail, we preserve the Authorization header for OIDC verification
+    let mut sensitive_headers = std::collections::HashSet::from([
         "cookie",
         "set-cookie",
         "proxy-authorization",
@@ -261,6 +347,11 @@ pub async fn ingest_webhook(
         "x-csrf-token",
         "x-xsrf-token",
     ]);
+
+    // Only filter authorization header for non-Gmail providers
+    if provider_slug != "gmail" {
+        sensitive_headers.insert("authorization");
+    }
 
     let webhook_headers: std::collections::HashMap<String, String> = headers
         .iter()
@@ -308,6 +399,15 @@ pub async fn ingest_webhook(
 
     // Extract webhook body from already read bytes
     let body = parse_webhook_body_from_bytes(&body_bytes);
+
+    // Gmail-specific synchronous verification (OIDC and body size)
+    if provider_slug == "gmail" {
+        // Validate body size first to reject oversized payloads early
+        validate_gmail_webhook_body_size(&body_bytes, &state.config)?;
+
+        // Verify OIDC token synchronously
+        verify_gmail_webhook_oidc(&headers, &state.config, &body_bytes)?;
+    }
 
     // If connection ID is provided, validate it belongs to tenant and provider
     if let Some(conn_id) = connection_id {
@@ -455,8 +555,8 @@ pub async fn ingest_public_webhook(
     };
 
     // Filter out sensitive headers before persisting in job cursor
-    let sensitive_headers = std::collections::HashSet::from([
-        "authorization",
+    // Note: For Gmail, we preserve the Authorization header for OIDC verification
+    let mut sensitive_headers = std::collections::HashSet::from([
         "cookie",
         "set-cookie",
         "proxy-authorization",
@@ -471,6 +571,11 @@ pub async fn ingest_public_webhook(
         "x-slack-request-timestamp",
         "x-webhook-secret", // Remove webhook secret headers from persisted data
     ]);
+
+    // Only filter authorization header for non-Gmail providers
+    if provider_slug != "gmail" {
+        sensitive_headers.insert("authorization");
+    }
 
     let webhook_headers: std::collections::HashMap<String, String> = headers
         .iter()
@@ -516,6 +621,15 @@ pub async fn ingest_public_webhook(
 
     // Extract webhook body from already read bytes
     let body = parse_webhook_body_from_bytes(&body_bytes);
+
+    // Gmail-specific synchronous verification (OIDC and body size)
+    if provider_slug == "gmail" {
+        // Validate body size first to reject oversized payloads early
+        validate_gmail_webhook_body_size(&body_bytes, &state.config)?;
+
+        // Verify OIDC token synchronously
+        verify_gmail_webhook_oidc(&headers, &state.config, &body_bytes)?;
+    }
 
     // If connection ID is provided, validate it belongs to tenant and provider
     if let Some(conn_id) = connection_id {
@@ -853,18 +967,18 @@ mod tests {
             .method("POST")
             .uri(format!("/webhooks/jira/{}", tenant_id))
             .header("Content-Type", "application/json")
-            .header("X-Webhook-Secret", "wrong")
+            .header("Authorization", "Bearer wrong")
             .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
             .unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        // Correct secret → 202
+        // Correct secret (Authorization: Bearer) → 202
         let request = Request::builder()
             .method("POST")
             .uri(format!("/webhooks/jira/{}", tenant_id))
             .header("Content-Type", "application/json")
-            .header("X-Webhook-Secret", "test-secret-123")
+            .header("Authorization", "Bearer test-secret-123")
             .body(Body::from(r#"{"event": "jira:issue_updated"}"#))
             .unwrap();
         let response = app.oneshot(request).await.unwrap();

@@ -55,6 +55,18 @@ pub struct AppConfig {
     pub jira_api_base: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_jira_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gmail_scopes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pubsub_oidc_audience: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pubsub_oidc_issuers: Option<Vec<String>>,
+    #[serde(default = "default_pubsub_max_body_kb")]
+    pub pubsub_max_body_kb: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gmail_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gmail_client_secret: Option<String>,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
     #[serde(default)]
@@ -227,6 +239,12 @@ impl Default for AppConfig {
             jira_oauth_base: default_jira_oauth_base(),
             jira_api_base: default_jira_api_base(),
             webhook_jira_secret: None,
+            gmail_scopes: None,
+            pubsub_oidc_audience: None,
+            pubsub_oidc_issuers: None,
+            pubsub_max_body_kb: default_pubsub_max_body_kb(),
+            gmail_client_id: None,
+            gmail_client_secret: None,
             webhook_slack_tolerance_seconds: default_webhook_slack_tolerance_seconds(),
             scheduler: SchedulerConfig::default(),
             rate_limit_policy: RateLimitPolicyConfig::default(),
@@ -459,9 +477,6 @@ impl AppConfig {
             if self.jira_client_secret.is_none() {
                 return Err(ConfigError::MissingJiraClientSecret);
             }
-            if self.webhook_jira_secret.is_none() {
-                return Err(ConfigError::MissingJiraWebhookSecret);
-            }
         }
         // Validate scheduler configuration
         self.scheduler.validate()?;
@@ -562,6 +577,10 @@ fn default_jira_oauth_base() -> String {
 
 fn default_jira_api_base() -> String {
     "https://api.atlassian.com".to_string()
+}
+
+fn default_pubsub_max_body_kb() -> usize {
+    256 // 256KB default max body size
 }
 
 /// Errors that can occur while loading configuration.
@@ -734,8 +753,22 @@ impl ConfigLoader {
         let github_oauth_base = layered.remove("GITHUB_OAUTH_BASE");
         let github_api_base = layered.remove("GITHUB_API_BASE");
         let webhook_slack_signing_secret = layered.remove("WEBHOOK_SLACK_SIGNING_SECRET");
-        let jira_client_id = layered.remove("JIRA_CLIENT_ID");
-        let jira_client_secret = layered.remove("JIRA_CLIENT_SECRET");
+        let jira_client_id = layered.remove("JIRA_CLIENT_ID").and_then(|val| {
+            let trimmed = val.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let jira_client_secret = layered.remove("JIRA_CLIENT_SECRET").and_then(|val| {
+            let trimmed = val.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
         let jira_oauth_base = layered
             .remove("JIRA_OAUTH_BASE")
             .or_else(|| Some(default_jira_oauth_base()));
@@ -743,10 +776,29 @@ impl ConfigLoader {
             .remove("JIRA_API_BASE")
             .or_else(|| Some(default_jira_api_base()));
         let webhook_jira_secret = layered.remove("WEBHOOK_JIRA_SECRET");
+
+        // Parse Gmail configuration
+        let gmail_scopes = layered.remove("GMAIL_SCOPES");
+        let gmail_client_id = layered.remove("GMAIL_CLIENT_ID");
+        let gmail_client_secret = layered.remove("GMAIL_CLIENT_SECRET");
+        let pubsub_oidc_audience = layered.remove("PUBSUB_OIDC_AUDIENCE");
+        let pubsub_oidc_issuers = layered.remove("PUBSUB_OIDC_ISSUERS").map(|issuers| {
+            issuers
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+        let pubsub_max_body_kb = layered
+            .remove("PUBSUB_MAX_BODY_KB")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_pubsub_max_body_kb);
         let webhook_slack_tolerance_seconds = layered
             .remove("WEBHOOK_SLACK_TOLERANCE_SECONDS")
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_webhook_slack_tolerance_seconds);
+
+        // Do not inject hardcoded Jira client credentials; require explicit configuration
 
         // Parse sync scheduler configuration
         let sync_scheduler_tick_interval_seconds = layered
@@ -897,6 +949,12 @@ impl ConfigLoader {
             jira_oauth_base: jira_oauth_base.unwrap_or_default(),
             jira_api_base: jira_api_base.unwrap_or_default(),
             webhook_jira_secret,
+            gmail_scopes,
+            gmail_client_id,
+            gmail_client_secret,
+            pubsub_oidc_audience,
+            pubsub_oidc_issuers,
+            pubsub_max_body_kb,
         };
 
         // Validate configuration

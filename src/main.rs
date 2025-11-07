@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // Initialize the connector registry
-    Registry::initialize();
+    Registry::initialize(&config);
     println!("Connector registry initialized with example provider");
 
     // Log the loaded configuration (no secrets in current schema)
@@ -154,7 +154,7 @@ async fn handle_sync_executor_command(
     }
 
     // Initialize the connector registry
-    Registry::initialize();
+    Registry::initialize(&config);
     println!("Connector registry initialized");
 
     // Log rate limit policy configuration

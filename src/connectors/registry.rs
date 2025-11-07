@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use crate::config::AppConfig;
 use crate::connectors::{AuthType, Connector, ProviderMetadata};
+use tracing::warn;
 
 /// Error type for registry operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -39,44 +41,81 @@ impl Registry {
     }
 
     /// Initialize the global registry with providers
-    pub fn initialize() {
+    pub fn initialize(config: &AppConfig) {
         let registry = Self::global();
         let mut reg = registry.write().unwrap();
 
         // Register example connector
         crate::connectors::example::register_example_connector(&mut reg);
-        // Register Jira connector if configured
-        let jira_client_id = std::env::var("JIRA_CLIENT_ID")
-            .or_else(|_| std::env::var("POBLYSH_JIRA_CLIENT_ID"))
-            .ok();
-        let jira_oauth_base = std::env::var("JIRA_OAUTH_BASE")
-            .or_else(|_| std::env::var("POBLYSH_JIRA_OAUTH_BASE"))
-            .unwrap_or_else(|_| "https://auth.atlassian.com".to_string());
-
-        if let Some(client_id) = jira_client_id {
+        // Register Jira connector only if configured explicitly
+        if let (Some(client_id), Some(client_secret)) = (
+            config.jira_client_id.clone(),
+            config.jira_client_secret.clone(),
+        ) {
             let jira_connector = Arc::new(crate::connectors::JiraConnector::new(
                 client_id,
-                jira_oauth_base,
+                client_secret,
+                config.jira_oauth_base.clone(),
+                config.jira_api_base.clone(),
             ));
             crate::connectors::register_jira_connector(&mut reg, jira_connector);
+        } else {
+            warn!("Jira connector not registered: missing Jira client credentials");
         }
         // Register Google Drive connector
         crate::connectors::google_drive::register_google_drive_connector(&mut reg);
 
+        // Register Google Calendar connector
+        crate::connectors::google_calendar::register_google_calendar_connector(&mut reg);
+
+        // Register Gmail connector
+        let gmail_scopes = config
+            .gmail_scopes
+            .as_ref()
+            .map(|scopes| scopes.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_else(|| {
+                crate::connectors::gmail::DEFAULT_GMAIL_SCOPES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+
+        let gmail_connector =
+            Arc::new(crate::connectors::GmailConnector::new_with_oidc_and_scopes(
+                config
+                    .gmail_client_id
+                    .clone()
+                    .unwrap_or_else(|| "local-gmail-client-id".to_string()),
+                config
+                    .gmail_client_secret
+                    .clone()
+                    .unwrap_or_else(|| "local-gmail-client-secret".to_string()),
+                config.pubsub_oidc_audience.clone(),
+                config.pubsub_oidc_issuers.clone(),
+                gmail_scopes,
+            ));
+        crate::connectors::gmail::register_gmail_connector(&mut reg, gmail_connector);
+
         // Register GitHub connector if configured
         // Note: This is a simplified registration - in production, this would use
         // the actual configuration from the app config
-        let client_id = std::env::var("GITHUB_CLIENT_ID")
-            .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_ID"))
-            .ok();
-        let client_secret = std::env::var("GITHUB_CLIENT_SECRET")
-            .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_SECRET"))
-            .ok();
+        let client_id = config.github_client_id.clone().or_else(|| {
+            std::env::var("GITHUB_CLIENT_ID")
+                .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_ID"))
+                .ok()
+        });
+        let client_secret = config.github_client_secret.clone().or_else(|| {
+            std::env::var("GITHUB_CLIENT_SECRET")
+                .or_else(|_| std::env::var("POBLYSH_GITHUB_CLIENT_SECRET"))
+                .ok()
+        });
 
         if let (Some(client_id), Some(client_secret)) = (client_id, client_secret) {
-            let webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
-                .or_else(|_| std::env::var("POBLYSH_WEBHOOK_GITHUB_SECRET"))
-                .ok();
+            let webhook_secret = config.webhook_github_secret.clone().or_else(|| {
+                std::env::var("GITHUB_WEBHOOK_SECRET")
+                    .or_else(|_| std::env::var("POBLYSH_WEBHOOK_GITHUB_SECRET"))
+                    .ok()
+            });
 
             let github_connector = Arc::new(crate::connectors::GitHubConnector::new(
                 client_id,
@@ -347,7 +386,8 @@ mod tests {
         // Note: This requires access to the global registry initialization
 
         // Call initialize to seed the registry
-        Registry::initialize();
+        let config = crate::config::AppConfig::default();
+        Registry::initialize(&config);
 
         // Verify that the example provider is now present
         let metadata_result = Registry::get_provider_metadata("example");
