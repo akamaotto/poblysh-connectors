@@ -230,11 +230,13 @@ fn verify_gmail_webhook_oidc(
         })?;
 
     // Verify JWT synchronously using Gmail connector's OIDC verification
+    let spam_filter = std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
     let connector = crate::connectors::gmail::GmailConnector::new_with_oidc(
         "dummy-client-id".to_string(),
         "dummy-client-secret".to_string(),
         Some(audience.clone()),
         Some(issuers.clone()),
+        spam_filter,
     );
 
     // Use tokio runtime to verify the token synchronously

@@ -10,7 +10,7 @@ use axum::{
     http::HeaderValue,
     middleware,
     response::Response,
-    routing::{get, post},
+    routing::{delete, get, patch, post},
 };
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
@@ -97,6 +97,22 @@ pub fn create_app(state: AppState) -> Router {
         .route("/connections", get(handlers::connections::list_connections))
         .route("/jobs", get(handlers::jobs::list_jobs))
         .route("/signals", get(handlers::signals::list_signals))
+        .route(
+            "/grounded-signals",
+            get(handlers::grounded_signals::list_grounded_signals),
+        )
+        .route(
+            "/grounded-signals/{id}",
+            get(handlers::grounded_signals::get_grounded_signal),
+        )
+        .route(
+            "/grounded-signals/{id}",
+            patch(handlers::grounded_signals::update_grounded_signal),
+        )
+        .route(
+            "/grounded-signals/{id}",
+            delete(handlers::grounded_signals::delete_grounded_signal),
+        )
         .route("/connect/{provider}", post(handlers::connect::start_oauth))
         .route(
             "/webhooks/{provider}",
@@ -321,11 +337,15 @@ pub async fn run_server(
         crate::handlers::connections::list_connections,
         crate::handlers::jobs::list_jobs,
         crate::handlers::signals::list_signals,
+        crate::handlers::grounded_signals::list_grounded_signals,
+        crate::handlers::grounded_signals::get_grounded_signal,
+        crate::handlers::grounded_signals::update_grounded_signal,
+        crate::handlers::grounded_signals::delete_grounded_signal,
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
         crate::handlers::webhooks::ingest_webhook,
         crate::handlers::webhooks::ingest_public_webhook,
-    ),
+            ),
     components(
         schemas(
             crate::models::ServiceInfo,
@@ -344,7 +364,6 @@ pub async fn run_server(
             crate::handlers::signals::SignalInfo,
             crate::handlers::signals::SignalsResponse,
             crate::handlers::signals::ListSignalsQuery,
-
             crate::handlers::connect::ProviderPath,
             crate::handlers::connect::OAuthCallbackQuery,
             crate::handlers::connect::ConnectionResponse,
@@ -377,6 +396,7 @@ pub async fn run_server(
         (name = "webhooks", description = "Webhook ingest endpoints"),
         (name = "jobs", description = "Jobs listing and management endpoints"),
         (name = "signals", description = "Signals listing and querying endpoints"),
+        (name = "grounded-signals", description = "Grounded signals management endpoints"),
     ),
     security(
         ("bearer_auth" = []),

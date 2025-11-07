@@ -53,21 +53,27 @@ pub enum ZohoDataCenter {
     Uk,
 }
 
-impl ZohoDataCenter {
-    pub fn from_str(dc: &str) -> Option<Self> {
-        match dc.to_ascii_lowercase().as_str() {
-            "us" => Some(Self::Us),
-            "eu" => Some(Self::Eu),
-            "in" => Some(Self::In),
-            "au" => Some(Self::Au),
-            "jp" => Some(Self::Jp),
-            "ca" => Some(Self::Ca),
-            "sa" => Some(Self::Sa),
-            "uk" => Some(Self::Uk),
-            _ => None,
+use std::str::FromStr;
+
+impl FromStr for ZohoDataCenter {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "us" => Ok(Self::Us),
+            "eu" => Ok(Self::Eu),
+            "in" => Ok(Self::In),
+            "au" => Ok(Self::Au),
+            "jp" => Ok(Self::Jp),
+            "ca" => Ok(Self::Ca),
+            "sa" => Ok(Self::Sa),
+            "uk" => Ok(Self::Uk),
+            _ => Err(()),
         }
     }
+}
 
+impl ZohoDataCenter {
     pub fn accounts_base(&self) -> &'static str {
         match self {
             ZohoDataCenter::Us => "https://accounts.zoho.com",
@@ -127,7 +133,7 @@ impl ZohoMailConfig {
 
         let dc_raw = std::env::var("POBLYSH_ZOHO_MAIL_DC")
             .map_err(|_| SyncError::permanent("Missing POBLYSH_ZOHO_MAIL_DC for Zoho Mail"))?;
-        let dc = ZohoDataCenter::from_str(&dc_raw).ok_or_else(|| {
+        let dc = dc_raw.parse::<ZohoDataCenter>().map_err(|_| {
             SyncError::permanent(format!(
                 "Invalid POBLYSH_ZOHO_MAIL_DC '{}': must be one of us,eu,in,au,jp,ca,sa,uk",
                 dc_raw
@@ -173,7 +179,7 @@ impl ZohoMailConfig {
 }
 
 fn parse_scopes(raw: String) -> Vec<String> {
-    raw.split(|c: char| c == ' ' || c == ',')
+    raw.split([' ', ','])
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(ToString::to_string)
@@ -197,9 +203,7 @@ impl ZohoMailConnector {
     }
 
     pub fn new(config: ZohoMailConfig) -> Result<Self, SyncError> {
-        Ok(Self {
-            config,
-        })
+        Ok(Self { config })
     }
 
     /// Build authorization URL for a tenant with configured scopes.
@@ -214,7 +218,10 @@ impl ZohoMailConnector {
             .append_pair("access_type", "offline")
             .append_pair(
                 "redirect_uri",
-                params.redirect_uri.as_deref().unwrap_or("https://localhost:3000/callback"),
+                params
+                    .redirect_uri
+                    .as_deref()
+                    .unwrap_or("https://localhost:3000/callback"),
             )
             .append_pair(
                 "state",
@@ -385,15 +392,9 @@ mod tests {
 
     #[test]
     fn dc_from_str_parses_known_values() {
-        assert!(matches!(
-            ZohoDataCenter::from_str("us"),
-            Some(ZohoDataCenter::Us)
-        ));
-        assert!(matches!(
-            ZohoDataCenter::from_str("EU"),
-            Some(ZohoDataCenter::Eu)
-        ));
-        assert!(ZohoDataCenter::from_str("unknown").is_none());
+        assert!(ZohoDataCenter::from_str("us").is_ok());
+        assert!(ZohoDataCenter::from_str("EU").is_ok());
+        assert!(ZohoDataCenter::from_str("unknown").is_err());
     }
 
     #[test]
@@ -528,16 +529,21 @@ mod tests {
         };
         let connector = ZohoMailConnector::new(config).expect("connector");
 
-        let payload = connector.build_signal_payload(
-            "email_received",
-            "msg_123",
-            Utc::now(),
-        );
+        let payload = connector.build_signal_payload("email_received", "msg_123", Utc::now());
 
         // Check required fields
-        assert_eq!(payload.get("provider").unwrap(), &serde_json::Value::String("zoho-mail".to_string()));
-        assert_eq!(payload.get("kind").unwrap(), &serde_json::Value::String("email_received".to_string()));
-        assert_eq!(payload.get("message_id").unwrap(), &serde_json::Value::String("msg_123".to_string()));
+        assert_eq!(
+            payload.get("provider").unwrap(),
+            &serde_json::Value::String("zoho-mail".to_string())
+        );
+        assert_eq!(
+            payload.get("kind").unwrap(),
+            &serde_json::Value::String("email_received".to_string())
+        );
+        assert_eq!(
+            payload.get("message_id").unwrap(),
+            &serde_json::Value::String("msg_123".to_string())
+        );
 
         // Check that occurred_at is a valid RFC3339 timestamp
         let occurred_at = payload.get("occurred_at").unwrap().as_str().unwrap();

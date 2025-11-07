@@ -1,9 +1,8 @@
 ---
-name: OpenSpec: Apply
 description: Implement an approved OpenSpec change and keep tasks in sync.
-category: OpenSpec
-tags: [openspec, apply]
 ---
+
+$ARGUMENTS
 <!-- OPENSPEC:START -->
 **Guardrails**
 - Favor straightforward, minimal implementations first and add complexity only when it is requested or clearly required.

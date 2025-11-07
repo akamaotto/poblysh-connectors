@@ -67,6 +67,48 @@ Configuration keys use the `POBLYSH_` prefix. The MVP fields are:
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS` – connection acquire timeout in milliseconds (default: 5000)
 - `POBLYSH_CRYPTO_KEY` – base64-encoded 32 byte key used to encrypt access/refresh tokens (required)
 
+### Mail Spam Filtering
+
+The service includes a centralized spam filtering system for mail connectors. Configure spam filtering with these environment variables:
+
+- `POBLYSH_MAIL_SPAM_THRESHOLD` – Spam confidence threshold (0.0-1.0, default: 0.8). Messages scoring >= threshold are blocked
+- `POBLYSH_MAIL_SPAM_ALLOWLIST` – Comma-separated trusted emails/domains that are never marked as spam
+- `POBLYSH_MAIL_SPAM_DENYLIST` – Comma-separated blocked emails/domains that are always marked as spam
+
+**Spam Filtering Examples:**
+
+```bash
+# Default configuration (moderate filtering)
+POBLYSH_MAIL_SPAM_THRESHOLD=0.8
+
+# Aggressive filtering - block more potential spam
+POBLYSH_MAIL_SPAM_THRESHOLD=0.5
+
+# Lenient filtering - allow more messages through
+POBLYSH_MAIL_SPAM_THRESHOLD=0.9
+
+# Trust specific domains and emails
+POBLYSH_MAIL_SPAM_ALLOWLIST="@trustedcompany.com,user@important.com"
+
+# Block known spam domains
+POBLYSH_MAIL_SPAM_DENYLIST="@spammydomain.com,blocked@badactor.net"
+
+# Combined configuration
+POBLYSH_MAIL_SPAM_THRESHOLD=0.6 \
+POBLYSH_MAIL_SPAM_ALLOWLIST="@mycompany.com" \
+POBLYSH_MAIL_SPAM_DENYLIST="@spam.com"
+```
+
+**Spam Detection Logic:**
+
+- **Provider Labels**: Respects Gmail labels (SPAM, TRASH, PROMOTIONS, etc.)
+- **Subject Analysis**: Detects urgency words, financial offers, phishing attempts
+- **Attachment Heuristics**: Identifies suspicious file types (.exe, .bat, .scr, etc.)
+- **Allowlist Override**: Allowlisted senders always bypass spam filtering
+- **Denylist Override**: Denylisted senders are always marked as spam
+
+**Telemetry:** Spam decisions are logged with structured telemetry including provider, message ID, spam score, and decision reason.
+
 Example:
 ```bash
 POBLYSH_PROFILE=test \

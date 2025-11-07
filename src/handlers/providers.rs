@@ -129,7 +129,14 @@ mod tests {
             response.providers.iter().map(|p| p.name.clone()).collect();
         assert_eq!(
             provider_names,
-            vec!["github", "google-workspace", "jira", "slack", "zoho", "zoho-cliq"]
+            vec![
+                "github",
+                "google-workspace",
+                "jira",
+                "slack",
+                "zoho",
+                "zoho-cliq"
+            ]
         );
 
         // Verify specific provider data

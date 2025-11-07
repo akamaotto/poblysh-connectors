@@ -332,6 +332,8 @@ pub struct GmailConnector {
     oidc_verifier: Option<OidcVerifier>,
     /// Gmail History API base endpoint (overridable for tests)
     gmail_users_endpoint: String,
+    /// Mail spam filter instance
+    spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
 }
 
 impl GmailConnector {
@@ -349,6 +351,7 @@ impl GmailConnector {
         oidc_audience: Option<String>,
         oidc_issuers: Option<Vec<String>>,
         gmail_users_endpoint: String,
+        spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
     ) -> Self {
         let http_client = Self::build_http_client();
 
@@ -366,11 +369,16 @@ impl GmailConnector {
             http_client,
             oidc_verifier,
             gmail_users_endpoint,
+            spam_filter,
         }
     }
 
     /// Create a new Gmail connector
-    pub fn new(client_id: String, client_secret: String) -> Self {
+    pub fn new(
+        client_id: String,
+        client_secret: String,
+        spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
+    ) -> Self {
         Self::new_with_options(
             client_id,
             client_secret,
@@ -378,6 +386,7 @@ impl GmailConnector {
             None,
             None,
             GMAIL_USERS_ENDPOINT.to_string(),
+            spam_filter,
         )
     }
 
@@ -387,6 +396,7 @@ impl GmailConnector {
         client_secret: String,
         oidc_audience: Option<String>,
         oidc_issuers: Option<Vec<String>>,
+        spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
     ) -> Self {
         Self::new_with_oidc_and_scopes(
             client_id,
@@ -394,6 +404,7 @@ impl GmailConnector {
             oidc_audience,
             oidc_issuers,
             DEFAULT_GMAIL_SCOPES.iter().map(|s| s.to_string()).collect(),
+            spam_filter,
         )
     }
 
@@ -404,6 +415,7 @@ impl GmailConnector {
         oidc_audience: Option<String>,
         oidc_issuers: Option<Vec<String>>,
         scopes: Vec<String>,
+        spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
     ) -> Self {
         Self::new_with_options(
             client_id,
@@ -412,6 +424,7 @@ impl GmailConnector {
             oidc_audience,
             oidc_issuers,
             GMAIL_USERS_ENDPOINT.to_string(),
+            spam_filter,
         )
     }
 
@@ -420,6 +433,7 @@ impl GmailConnector {
         client_id: String,
         client_secret: String,
         gmail_users_endpoint: String,
+        spam_filter: std::sync::Arc<dyn crate::mail::MailSpamFilter>,
     ) -> Self {
         Self::new_with_options(
             client_id,
@@ -428,6 +442,7 @@ impl GmailConnector {
             None,
             None,
             gmail_users_endpoint,
+            spam_filter,
         )
     }
 
@@ -752,6 +767,22 @@ impl GmailConnector {
     ) -> Result<Vec<Signal>, GmailError> {
         let mut signals = Vec::new();
 
+        // Apply spam filtering to added messages
+        if let Some(ref messages_added) = record.messages_added {
+            for message in messages_added {
+                if self.is_message_spam(message).await? {
+                    // Log telemetry for spam rejection
+                    tracing::info!(
+                        provider = "gmail",
+                        connection_id = %connection.id,
+                        message_id = %message.id,
+                        "Message rejected as spam"
+                    );
+                    continue; // Skip creating signal for spam messages
+                }
+            }
+        }
+
         let deleted = record
             .messages_deleted
             .as_ref()
@@ -767,6 +798,46 @@ impl GmailConnector {
         signals.push(self.create_email_signal_from_record(connection, signal_type, &record)?);
 
         Ok(signals)
+    }
+
+    /// Check if a Gmail message should be considered spam
+    async fn is_message_spam(&self, message: &GmailMessage) -> Result<bool, GmailError> {
+        use crate::mail::{MailMetadata, MailProvider};
+
+        // Create mail metadata for spam filtering (simplified for current GmailMessage structure)
+        let metadata = MailMetadata {
+            provider: MailProvider::Gmail,
+            labels: message.label_ids.clone(),
+            subject: None, // Not available in current GmailMessage structure
+            headers: std::collections::HashMap::new(), // Not available in current structure
+            from: None,    // Not available in current structure
+            to: Vec::new(), // Not available in current structure
+            has_attachments: false, // Not available in current structure
+            attachment_extensions: Vec::new(), // Not available in current structure
+        };
+
+        // Evaluate using the spam filter
+        let verdict = self.spam_filter.evaluate(&metadata);
+
+        // Log detailed telemetry for spam decisions
+        if verdict.is_spam {
+            tracing::info!(
+                provider = "gmail",
+                message_id = %message.id,
+                spam_score = verdict.score,
+                spam_reason = %verdict.reason,
+                "Message identified as spam"
+            );
+        } else {
+            tracing::debug!(
+                provider = "gmail",
+                message_id = %message.id,
+                spam_score = verdict.score,
+                "Message passed spam filter"
+            );
+        }
+
+        Ok(verdict.is_spam)
     }
 
     /// Create a normalized email signal from Gmail history record
@@ -1290,9 +1361,12 @@ mod tests {
 
     #[test]
     fn test_parse_webhook_payload() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
 
         // Create a mock Pub/Sub payload
@@ -1321,9 +1395,12 @@ mod tests {
 
     #[test]
     fn test_parse_webhook_payload_invalid_format() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
 
         let payload = json!({
@@ -1337,11 +1414,14 @@ mod tests {
     #[test]
     fn test_gmail_connector_with_oidc_verification() {
         // Test that OIDC-enabled connector can be created
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new_with_oidc(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
             Some("test-audience".to_string()),
             Some(vec!["https://accounts.google.com".to_string()]),
+            spam_filter,
         );
 
         // Verify OIDC verifier is configured
@@ -1349,11 +1429,70 @@ mod tests {
     }
 
     #[test]
-    fn test_gmail_connector_without_oidc_verification() {
-        // Test that regular connector can be created without OIDC
+    fn test_gmail_spam_filtering_integration() {
+        // Test that Gmail connector properly uses spam filter
+        let config = crate::mail::MailSpamRuntimeConfig::new(0.5)
+            .with_denylist(vec!["@spam.com".to_string()]);
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::new(config));
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
+        );
+
+        // Create a test message with spam label
+        let spam_message = GmailMessage {
+            id: "spam-message-123".to_string(),
+            thread_id: None,
+            history_id: None,
+            internal_date: None,
+            size_estimate: None,
+            snippet: None,
+            label_ids: vec!["SPAM".to_string()],
+        };
+
+        // Test spam detection
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let is_spam = rt
+            .block_on(async { connector.is_message_spam(&spam_message).await })
+            .expect("Spam filtering should not error");
+
+        assert!(
+            is_spam,
+            "Message with SPAM label should be detected as spam"
+        );
+
+        // Create a normal message
+        let normal_message = GmailMessage {
+            id: "normal-message-456".to_string(),
+            thread_id: None,
+            history_id: None,
+            internal_date: None,
+            size_estimate: None,
+            snippet: None,
+            label_ids: vec!["INBOX".to_string()],
+        };
+
+        let is_spam = rt
+            .block_on(async { connector.is_message_spam(&normal_message).await })
+            .expect("Spam filtering should not error");
+
+        assert!(
+            !is_spam,
+            "Message with INBOX label should not be detected as spam"
+        );
+    }
+
+    #[test]
+    fn test_gmail_connector_without_oidc_verification() {
+        // Test that regular connector can be created without OIDC
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
+        let connector = GmailConnector::new(
+            "test-client-id".to_string(),
+            "test-client-secret".to_string(),
+            spam_filter,
         );
 
         // Verify OIDC verifier is not configured
@@ -1362,9 +1501,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_oidc_token_no_verifier() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
 
         // When OIDC verifier is not configured, verification should fail
@@ -1375,9 +1517,12 @@ mod tests {
 
     #[test]
     fn test_create_email_signal() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
 
         let connection = build_test_connection();
@@ -1399,9 +1544,12 @@ mod tests {
 
     #[test]
     fn test_build_authorize_url() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
 
         let params = AuthorizeParams {
@@ -1465,10 +1613,13 @@ mod tests {
             .mount(&server)
             .await;
 
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new_with_history_endpoint_for_tests(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
             format!("{}/gmail/v1/users", server.uri()),
+            spam_filter,
         );
 
         let connection = build_test_connection();
@@ -1497,9 +1648,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_history_record_maps_update_counts() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
         let connection = build_test_connection();
         let record = GmailHistoryRecord {
@@ -1548,9 +1702,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_history_record_maps_deletes() {
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
+            spam_filter,
         );
         let connection = build_test_connection();
         let record = GmailHistoryRecord {
@@ -1593,10 +1750,13 @@ mod tests {
             .mount(&server)
             .await;
 
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new_with_history_endpoint_for_tests(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
             format!("{}/gmail/v1/users", server.uri()),
+            spam_filter,
         );
 
         let params = SyncParams {
@@ -1632,10 +1792,13 @@ mod tests {
             .mount(&server)
             .await;
 
+        let spam_filter =
+            std::sync::Arc::new(crate::mail::default::DefaultMailSpamFilter::default());
         let connector = GmailConnector::new_with_history_endpoint_for_tests(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
             format!("{}/gmail/v1/users", server.uri()),
+            spam_filter,
         );
 
         let params = SyncParams {

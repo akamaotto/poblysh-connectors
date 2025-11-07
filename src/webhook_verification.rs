@@ -611,7 +611,10 @@ mod tests {
     #[test]
     fn test_zoho_cliq_token_verification_with_bearer() {
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", "Bearer zoho-cliq-token-123".parse().unwrap());
+        headers.insert(
+            "authorization",
+            "Bearer zoho-cliq-token-123".parse().unwrap(),
+        );
 
         let mut config = AppConfig::default();
         config.webhook_zoho_cliq_token = Some("zoho-cliq-token-123".to_string());

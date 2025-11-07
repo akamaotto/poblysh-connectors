@@ -2,9 +2,9 @@
 //!
 //! Tests focused on webhook verification and processing without complex setup
 
-use connectors::webhook_verification::{verify_webhook_signature, VerificationError};
-use connectors::config::AppConfig;
 use axum::http::HeaderMap;
+use connectors::config::AppConfig;
+use connectors::webhook_verification::{VerificationError, verify_webhook_signature};
 
 /// Test Zoho Cliq webhook verification with valid Bearer token
 #[tokio::test]
@@ -13,7 +13,10 @@ async fn test_zoho_cliq_webhook_verification_integration() {
     config.webhook_zoho_cliq_token = Some("test-zoho-cliq-token".to_string());
 
     let mut headers = HeaderMap::new();
-    headers.insert("authorization", "Bearer test-zoho-cliq-token".parse().unwrap());
+    headers.insert(
+        "authorization",
+        "Bearer test-zoho-cliq-token".parse().unwrap(),
+    );
 
     let payload = r#"{"event_type": "message_posted", "message": {"id": "msg_123"}}"#;
 
@@ -34,7 +37,10 @@ async fn test_zoho_cliq_webhook_verification_rejection_integration() {
 
     let result = verify_webhook_signature("zoho-cliq", payload.as_bytes(), &headers, &config);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), VerificationError::VerificationFailed));
+    assert!(matches!(
+        result.unwrap_err(),
+        VerificationError::VerificationFailed
+    ));
 }
 
 /// Test Zoho Cliq webhook verification when not configured
@@ -49,7 +55,10 @@ async fn test_zoho_cliq_webhook_verification_not_configured_integration() {
 
     let result = verify_webhook_signature("zoho-cliq", payload.as_bytes(), &headers, &config);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), VerificationError::NotConfigured { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        VerificationError::NotConfigured { .. }
+    ));
 }
 
 /// Test Zoho Cliq webhook verification with missing Authorization header
@@ -64,7 +73,10 @@ async fn test_zoho_cliq_webhook_verification_missing_auth_integration() {
 
     let result = verify_webhook_signature("zoho-cliq", payload.as_bytes(), &headers, &config);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), VerificationError::MissingSignature { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        VerificationError::MissingSignature { .. }
+    ));
 }
 
 /// Test that other providers still work correctly
@@ -84,5 +96,8 @@ async fn test_other_providers_unaffected_integration() {
     // Test unsupported provider
     let result = verify_webhook_signature("unknown", b"test", &headers, &config);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), VerificationError::UnsupportedProvider { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        VerificationError::UnsupportedProvider { .. }
+    ));
 }

@@ -7,7 +7,7 @@ edition = "2024"
 async-trait = "0.1.85"
 axum = "0.8.6"
 tokio = { version = "1.48.0", features = ["full"] }
-utoipa = "5.3.1"
+utoipa = { version = "5.4.0", features = ["uuid", "chrono", "time"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
@@ -27,7 +27,7 @@ sea-orm-migration = { version = "1.1.1", default-features = false, features = [
     "sqlx-postgres",
     "sqlx-sqlite",
 ] }
-uuid = { version = "1.11.0", features = ["v4"] }
+uuid = { version = "1.11.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.5.26", features = ["derive"] }
 migration = { path = "migration" }

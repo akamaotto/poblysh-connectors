@@ -80,6 +80,8 @@ impl Registry {
                     .collect()
             });
 
+        let gmail_spam_filter =
+            crate::mail::integration::create_spam_filter_from_config(&config.mail_spam);
         let gmail_connector =
             Arc::new(crate::connectors::GmailConnector::new_with_oidc_and_scopes(
                 config
@@ -93,6 +95,7 @@ impl Registry {
                 config.pubsub_oidc_audience.clone(),
                 config.pubsub_oidc_issuers.clone(),
                 gmail_scopes,
+                gmail_spam_filter,
             ));
         crate::connectors::gmail::register_gmail_connector(&mut reg, gmail_connector);
 

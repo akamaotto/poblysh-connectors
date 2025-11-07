@@ -36,7 +36,7 @@ pub struct ApiError {
 
 impl ApiError {
     /// Create a new API error with the given status code and message
-    pub fn new<S: Into<String>>(status: StatusCode, code: S, message: S) -> Self {
+    pub fn new<C: Into<String>, M: Into<String>>(status: StatusCode, code: C, message: M) -> Self {
         Self {
             status,
             code: code.into().into_boxed_str(),
@@ -45,6 +45,25 @@ impl ApiError {
             retry_after: None,
             trace_id: Self::current_trace_id(),
         }
+    }
+
+    /// Create a bad request error (400)
+    pub fn bad_request<S: Into<String>>(message: S) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "BAD_REQUEST", message)
+    }
+
+    /// Create a not found error (404)
+    pub fn not_found<S: Into<String>>(message: S) -> Self {
+        Self::new(StatusCode::NOT_FOUND, "NOT_FOUND", message)
+    }
+
+    /// Create an internal server error (500)
+    pub fn internal_server_error<S: Into<String>>(message: S) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_SERVER_ERROR",
+            message,
+        )
     }
 
     /// Add details to the error
@@ -407,6 +426,11 @@ impl RepositoryError {
     /// Create a database error wrapper
     pub fn database_error(err: sea_orm::DbErr) -> Self {
         Self::Database(err)
+    }
+
+    /// Create a validation error
+    pub fn validation_error(message: &str) -> Self {
+        Self::Validation(message.to_string())
     }
 }
 

@@ -1631,7 +1631,7 @@ mod tests {
         let mut connector_with_mock = connector.clone();
         connector_with_mock.oauth_config.redirect_uri = format!("{}/callback", mock_server.uri());
 
-        let params = ExchangeTokenParams {
+        let _params = ExchangeTokenParams {
             code: "test_code".to_string(),
             redirect_uri: Some(format!("{}/callback", mock_server.uri())),
             tenant_id: Uuid::new_v4(),

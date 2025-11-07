@@ -5,6 +5,7 @@
 pub mod config;
 pub mod connect;
 pub mod connections;
+pub mod grounded_signals;
 pub mod jobs;
 pub mod providers;
 pub mod signals;

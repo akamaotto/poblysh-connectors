@@ -157,7 +157,7 @@ mod tests {
         });
 
         // Create a simple test state - we'll test the logic without requiring a full database
-        let crypto_key =
+        let _crypto_key =
             crate::crypto::CryptoKey::new(vec![0u8; 32]).expect("Failed to create test crypto key");
         let state = crate::server::create_test_app_state(
             (*config).clone(),

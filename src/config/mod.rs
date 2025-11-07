@@ -75,6 +75,8 @@ pub struct AppConfig {
     pub rate_limit_policy: RateLimitPolicyConfig,
     #[serde(default)]
     pub token_refresh: TokenRefreshConfig,
+    #[serde(default)]
+    pub mail_spam: MailSpamConfig,
 }
 
 /// Scheduler-specific configuration parameters.
@@ -160,6 +162,75 @@ pub struct RateLimitProviderOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = 0.2, minimum = 0.0, maximum = 1.0)]
     pub jitter_factor: Option<f64>,
+}
+
+/// Mail spam filtering configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct MailSpamConfig {
+    /// Spam threshold (0.0 to 1.0). Messages scoring >= threshold are considered spam (default: 0.8)
+    ///
+    /// Environment variable: `POBLYSH_MAIL_SPAM_THRESHOLD`
+    #[serde(default = "default_mail_spam_threshold")]
+    pub threshold: f32,
+
+    /// Comma-separated list of domains and email addresses that are always allowed (whitelist)
+    ///
+    /// Supports email addresses (user@example.com) and domains (@example.com)
+    ///
+    /// Environment variable: `POBLYSH_MAIL_SPAM_ALLOWLIST`
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowlist: Vec<String>,
+
+    /// Comma-separated list of domains and email addresses that are always blocked (blacklist)
+    ///
+    /// Supports email addresses (user@example.com) and domains (@example.com)
+    ///
+    /// Environment variable: `POBLYSH_MAIL_SPAM_DENYLIST`
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denylist: Vec<String>,
+}
+
+impl Default for MailSpamConfig {
+    fn default() -> Self {
+        Self {
+            threshold: default_mail_spam_threshold(),
+            allowlist: Vec::new(),
+            denylist: Vec::new(),
+        }
+    }
+}
+
+impl MailSpamConfig {
+    /// Validate mail spam configuration bounds
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate threshold bounds
+        if self.threshold < 0.0 || self.threshold > 1.0 {
+            return Err(ConfigError::InvalidMailSpamThreshold {
+                value: self.threshold,
+            });
+        }
+
+        // Validate allowlist entries
+        for entry in &self.allowlist {
+            if !is_valid_email_or_domain(entry) {
+                return Err(ConfigError::InvalidMailSpamAllowlistEntry {
+                    entry: entry.clone(),
+                });
+            }
+        }
+
+        // Validate denylist entries
+        for entry in &self.denylist {
+            if !is_valid_email_or_domain(entry) {
+                return Err(ConfigError::InvalidMailSpamDenylistEntry {
+                    entry: entry.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Token refresh service configuration
@@ -252,6 +323,7 @@ impl Default for AppConfig {
             scheduler: SchedulerConfig::default(),
             rate_limit_policy: RateLimitPolicyConfig::default(),
             token_refresh: TokenRefreshConfig::default(),
+            mail_spam: MailSpamConfig::default(),
         }
     }
 }
@@ -493,6 +565,9 @@ impl AppConfig {
         // Validate token refresh configuration
         self.token_refresh.validate()?;
 
+        // Validate mail spam configuration
+        self.mail_spam.validate()?;
+
         Ok(())
     }
 }
@@ -589,6 +664,10 @@ fn default_pubsub_max_body_kb() -> usize {
     256 // 256KB default max body size
 }
 
+fn default_mail_spam_threshold() -> f32 {
+    0.8 // Default spam threshold
+}
+
 /// Errors that can occur while loading configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -662,6 +741,33 @@ pub enum ConfigError {
     InvalidTokenRefreshConcurrency { value: u32 },
     #[error("token refresh jitter factor must be between 0.0 and 1.0, got {value}")]
     InvalidTokenRefreshJitter { value: f64 },
+    #[error("mail spam threshold must be between 0.0 and 1.0, got {value}")]
+    InvalidMailSpamThreshold { value: f32 },
+    #[error("invalid mail spam allowlist entry: {entry}")]
+    InvalidMailSpamAllowlistEntry { entry: String },
+    #[error("invalid mail spam denylist entry: {entry}")]
+    InvalidMailSpamDenylistEntry { entry: String },
+}
+
+/// Check if a string is a valid email or domain format
+fn is_valid_email_or_domain(entry: &str) -> bool {
+    if let Some(domain) = entry.strip_prefix('@') {
+        // Domain format (e.g., @example.com)
+        domain.contains('.')
+            && domain
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+    } else if entry.contains('@') {
+        // Email format
+        let parts: Vec<&str> = entry.split('@').collect();
+        parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty()
+    } else {
+        // Simple domain format
+        entry.contains('.')
+            && entry
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+    }
 }
 
 /// Loads configuration using layered `.env` files and `POBLYSH_*` env vars.
@@ -861,6 +967,32 @@ impl ConfigLoader {
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_token_refresh_jitter_factor);
 
+        // Parse mail spam configuration
+        let mail_spam_threshold = layered
+            .remove("MAIL_SPAM_THRESHOLD")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_mail_spam_threshold);
+        let mail_spam_allowlist = layered
+            .remove("MAIL_SPAM_ALLOWLIST")
+            .map(|allowlist| {
+                allowlist
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mail_spam_denylist = layered
+            .remove("MAIL_SPAM_DENYLIST")
+            .map(|denylist| {
+                denylist
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let scheduler = SchedulerConfig {
             tick_interval_seconds: sync_scheduler_tick_interval_seconds,
             default_interval_seconds: sync_scheduler_default_interval_seconds,
@@ -927,6 +1059,12 @@ impl ConfigLoader {
             jitter_factor: token_refresh_jitter_factor,
         };
 
+        let mail_spam = MailSpamConfig {
+            threshold: mail_spam_threshold,
+            allowlist: mail_spam_allowlist,
+            denylist: mail_spam_denylist,
+        };
+
         let config = AppConfig {
             profile,
             api_bind_addr,
@@ -963,6 +1101,7 @@ impl ConfigLoader {
             pubsub_oidc_audience,
             pubsub_oidc_issuers,
             pubsub_max_body_kb,
+            mail_spam,
         };
 
         // Validate configuration

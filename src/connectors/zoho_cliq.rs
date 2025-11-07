@@ -141,14 +141,15 @@ impl Connector for ZohoCliqConnector {
         );
 
         // First extract the event type to check if it's supported
-        let event_type = params.payload.get("event_type")
-            .and_then(|v| v.as_str());
+        let event_type = params.payload.get("event_type").and_then(|v| v.as_str());
 
         // If there's no event_type, the payload is malformed
         let event_type = match event_type {
             Some(event_type) => event_type,
             None => {
-                return Err(anyhow!("Invalid Zoho Cliq webhook payload: missing event_type").into());
+                return Err(
+                    anyhow!("Invalid Zoho Cliq webhook payload: missing event_type").into(),
+                );
             }
         };
 
@@ -167,8 +168,8 @@ impl Connector for ZohoCliqConnector {
         };
 
         // Now try to parse the payload as a Zoho Cliq event for supported types
-        let event: ZohoCliqMessageEvent = serde_json::from_value(params.payload.clone())
-            .map_err(|e| {
+        let event: ZohoCliqMessageEvent =
+            serde_json::from_value(params.payload.clone()).map_err(|e| {
                 debug!(error = %e, "Failed to parse Zoho Cliq webhook payload");
                 anyhow!("Invalid Zoho Cliq webhook payload: {}", e)
             })?;
@@ -183,11 +184,17 @@ impl Connector for ZohoCliqConnector {
 
         // Extract normalized fields from Zoho Cliq webhook payload
         let normalized_payload = extract_normalized_fields(&event);
-        let occurred_at = parse_zoho_timestamp(&event.message.posted_time)
-            .unwrap_or_else(|| parse_zoho_timestamp(&Some(event.timestamp.clone())).unwrap_or_else(Utc::now));
+        let occurred_at = parse_zoho_timestamp(&event.message.posted_time).unwrap_or_else(|| {
+            parse_zoho_timestamp(&Some(event.timestamp.clone())).unwrap_or_else(Utc::now)
+        });
 
         // Generate dedupe key using message ID and event type
-        let dedupe_key = format!("zoho-cliq:{}:{}:{}", signal_kind, event.message.id, occurred_at.timestamp());
+        let dedupe_key = format!(
+            "zoho-cliq:{}:{}:{}",
+            signal_kind,
+            event.message.id,
+            occurred_at.timestamp()
+        );
 
         Ok(vec![Signal {
             id: Uuid::new_v4(),
@@ -287,7 +294,7 @@ fn parse_zoho_timestamp(timestamp_str: &Option<String>) -> Option<DateTime<Utc>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::trait_::{WebhookParams};
+    use crate::connectors::trait_::WebhookParams;
     use chrono::{Datelike, Timelike};
     use uuid::Uuid;
 
@@ -484,7 +491,12 @@ mod tests {
 
         let result = connector.authorize(params).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("OAuth authorization is not supported"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("OAuth authorization is not supported")
+        );
 
         let exchange_params = ExchangeTokenParams {
             code: "test_code".to_string(),
@@ -494,7 +506,12 @@ mod tests {
 
         let result = connector.exchange_token(exchange_params).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Token exchange is not supported"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Token exchange is not supported")
+        );
     }
 
     #[test]
