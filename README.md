@@ -2,6 +2,10 @@
 
 A Rust-based API service for managing connectors, built with Axum and featuring OpenAPI documentation.
 
+# Business Use Case
+
+This project emerged from the Poblysh PRD framework (`plan/prd.md`) and the storytelling thesis documented in `plan/signals.md`. The goal is to ingest activity from SaaS tools (GitHub, Jira, Google, Zoho, etc.), normalize that activity into reusable Signals, encrypt tokens for each tenant, and surface those Signals to downstream Story Hunter workflows. In short, the Connectors API turns fragmented operational events into publishable stories, keeping PR/comm teams proactive without adding manual monitoring work. The README below focuses on the technical UX (local tooling, OpenAPI, Docker), but consult `plan/prd.md` and `plan/signals.md` for the product motivations, success metrics, and signal → grounded signal → Idea pipeline that the service implements.
+
 ## Prerequisites
 
 - Rust toolchain (latest stable version recommended)
