@@ -37,7 +37,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager.get_connection()
+        manager
+            .get_connection()
             .execute(Statement::from_string(
                 manager.get_database_backend(),
                 "DROP INDEX IF EXISTS idx_sync_jobs_incremental_pending",

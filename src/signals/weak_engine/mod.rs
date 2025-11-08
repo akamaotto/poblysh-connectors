@@ -135,7 +135,7 @@ impl WeakSignalEngine {
 
         // This is a simplified approach - in production you'd want to track which signals
         // have been processed to avoid reprocessing
-        let signal_repo = SignalRepository::new(&*self.db);
+        let signal_repo = SignalRepository::new(&self.db);
         let recent_signals = signal_repo
             .list_signals(
                 Uuid::default(), // Will be filtered by tenants later
@@ -195,8 +195,8 @@ impl WeakSignalEngine {
         );
 
         // Create repositories
-        let tenant_config_repo = TenantSignalConfigRepository::new(&*self.db);
-        let grounded_signal_repo = GroundedSignalRepository::new(&*self.db);
+        let tenant_config_repo = TenantSignalConfigRepository::new(&self.db);
+        let grounded_signal_repo = GroundedSignalRepository::new(&self.db);
 
         // Get tenant configuration
         let threshold = tenant_config_repo
@@ -216,7 +216,7 @@ impl WeakSignalEngine {
             .ok()
             .flatten();
 
-        let clusters = self.cluster_signals(&signals);
+        let clusters = self.cluster_signals(signals);
 
         for cluster in clusters {
             let grounded_signal = self
@@ -236,20 +236,20 @@ impl WeakSignalEngine {
                     cluster.signals.len()
                 );
 
-                if self.config.enable_notifications {
-                    if let Some(ref url) = webhook_url {
-                        let webhook_url_str: &str = url.as_str();
-                        let grounded_signal_ref: &GroundedSignalResponse = &gs;
-                        if let Err(e) = self
-                            .notifier
-                            .send_notification(webhook_url_str, grounded_signal_ref)
-                            .await
-                        {
-                            error!(
-                                "Failed to send notification for grounded signal {}: {}",
-                                gs.id, e
-                            );
-                        }
+                if self.config.enable_notifications
+                    && let Some(ref url) = webhook_url
+                {
+                    let webhook_url_str: &str = url.as_str();
+                    let grounded_signal_ref: &GroundedSignalResponse = &gs;
+                    if let Err(e) = self
+                        .notifier
+                        .send_notification(webhook_url_str, grounded_signal_ref)
+                        .await
+                    {
+                        error!(
+                            "Failed to send notification for grounded signal {}: {}",
+                            gs.id, e
+                        );
                     }
                 }
             }
@@ -401,10 +401,10 @@ impl WeakSignalEngine {
         let mut content_parts = Vec::new();
 
         for field in &content_fields {
-            if let Some(value) = payload.get(field) {
-                if let Some(text) = value.as_str() {
-                    content_parts.push(text);
-                }
+            if let Some(value) = payload.get(field)
+                && let Some(text) = value.as_str()
+            {
+                content_parts.push(text);
             }
         }
 
@@ -554,7 +554,7 @@ impl WeakSignalEngine {
         let content = self.extract_signal_content(signal).to_lowercase();
 
         // Generate recommendation based on signal type and high-scoring dimensions
-        let recommendation = if scores.impact > 0.8 && content.contains("security") {
+        if scores.impact > 0.8 && content.contains("security") {
             Some(
                 "URGENT: Potential security issue detected. Immediate investigation recommended."
                     .to_string(),
@@ -579,9 +579,7 @@ impl WeakSignalEngine {
             Some("High-confidence signal detected. Further investigation recommended.".to_string())
         } else {
             None // Don't provide recommendation for borderline cases
-        };
-
-        recommendation
+        }
     }
 }
 

@@ -13,6 +13,7 @@ pub mod error;
 pub mod handlers;
 pub mod mail;
 pub mod models;
+pub mod normalization;
 pub mod repositories;
 pub mod scheduler;
 pub mod seeds;

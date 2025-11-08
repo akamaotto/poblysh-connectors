@@ -43,12 +43,22 @@ pub struct Model {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, ToSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    Default,
 )]
 #[sea_orm(rs_type = "String", db_type = "Text")]
 pub enum GroundedSignalStatus {
     #[sea_orm(string_value = "draft")]
     #[serde(rename = "draft")]
+    #[default]
     Draft,
 
     #[sea_orm(string_value = "recommended")]
@@ -58,12 +68,6 @@ pub enum GroundedSignalStatus {
     #[sea_orm(string_value = "actioned")]
     #[serde(rename = "actioned")]
     Actioned,
-}
-
-impl Default for GroundedSignalStatus {
-    fn default() -> Self {
-        Self::Draft
-    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,0 +1,12 @@
+{
+  "provider": "example",
+  "name": "issue_created",
+  "input": {
+    "action": "created",
+    "title": "Add authentication support",
+    "state": "open"
+  },
+  "expected": {
+    "kind": "issue_created"
+  }
+}

@@ -18,8 +18,8 @@
 //!
 //! ## Supported Events
 //!
-//! - `event_updated` - Calendar event created or updated
-//! - `event_deleted` - Calendar event deleted
+//! - `calendar_event_updated` - Calendar event created or updated
+//! - `calendar_event_deleted` - Calendar event deleted
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -32,6 +32,7 @@ use crate::connectors::{
     trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::SignalKind;
 
 /// Google Calendar connector (MVP stub implementation)
 ///
@@ -143,7 +144,7 @@ impl Connector for GoogleCalendarConnector {
                     tenant_id: params.connection.tenant_id,
                     provider_slug: "google-calendar".to_string(),
                     connection_id: params.connection.id,
-                    kind: "event_updated".to_string(),
+                    kind: SignalKind::CalendarEventUpdated.as_str().to_string(),
                     occurred_at: now,
                     received_at: now,
                     payload: serde_json::json!({
@@ -161,7 +162,7 @@ impl Connector for GoogleCalendarConnector {
                     tenant_id: params.connection.tenant_id,
                     provider_slug: "google-calendar".to_string(),
                     connection_id: params.connection.id,
-                    kind: "event_deleted".to_string(),
+                    kind: SignalKind::CalendarEventDeleted.as_str().to_string(),
                     occurred_at: now - chrono::Duration::minutes(30),
                     received_at: now,
                     payload: serde_json::json!({

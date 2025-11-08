@@ -1,0 +1,13 @@
+{
+  "provider": "example",
+  "name": "message_posted",
+  "input": {
+    "type": "message",
+    "text": "Hello team!",
+    "channel": "general",
+    "user": "user123"
+  },
+  "expected": {
+    "kind": "message_posted"
+  }
+}

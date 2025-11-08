@@ -13,7 +13,11 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(TenantSignalConfig::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(TenantSignalConfig::TenantId).uuid().primary_key())
+                    .col(
+                        ColumnDef::new(TenantSignalConfig::TenantId)
+                            .uuid()
+                            .primary_key(),
+                    )
                     .col(
                         ColumnDef::new(TenantSignalConfig::WeakSignalThreshold)
                             .float()

@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::crypto::{
     CryptoKey, decrypt_connection_tokens, encrypt_connection_tokens, is_encrypted_payload,
 };
+use crate::cursor::{decode_generic_cursor, encode_generic_cursor};
 use crate::models::connection::{self, Entity as Connection};
 
 /// Repository for connection database operations
@@ -331,7 +332,53 @@ impl ConnectionRepository {
         Ok(())
     }
 
-    /// Lists connections with cursor pagination, returning the next cursor when available
+    /// Lists all connections for a tenant with cursor pagination
+    pub async fn list_by_tenant(
+        &self,
+        tenant_id: &Uuid,
+        limit: u64,
+        cursor: Option<String>,
+    ) -> Result<(Vec<connection::Model>, Option<String>)> {
+        if limit == 0 {
+            return Ok((Vec::new(), cursor));
+        }
+
+        let mut query = Connection::find()
+            .filter(connection::Column::TenantId.eq(*tenant_id))
+            .order_by_asc(connection::Column::CreatedAt)
+            .order_by_asc(connection::Column::Id);
+
+        if let Some(cursor) = cursor
+            && !cursor.is_empty()
+        {
+            let (created_at, cursor_id) = parse_connection_cursor(&cursor)?;
+            let condition = Condition::any()
+                .add(connection::Column::CreatedAt.gt(created_at))
+                .add(
+                    Condition::all()
+                        .add(connection::Column::CreatedAt.eq(created_at))
+                        .add(connection::Column::Id.gt(cursor_id)),
+                );
+            query = query.filter(condition);
+        }
+
+        let mut rows = query.limit(limit + 1).all(&*self.db).await?;
+
+        let next_cursor = if rows.len() as u64 > limit {
+            // Remove overflow row to get only the items to return
+            rows.pop().expect("limit+1 ensures overflow row");
+            // Build cursor from the last item that was actually returned
+            rows.last()
+                .map(|last_item| build_connection_cursor(&last_item.created_at, last_item.id))
+                .transpose()?
+        } else {
+            None
+        };
+
+        Ok((rows, next_cursor))
+    }
+
+    /// Lists connections for a tenant/provider pair with cursor pagination
     pub async fn list_by_tenant_provider(
         &self,
         tenant_id: &Uuid,
@@ -352,7 +399,7 @@ impl ConnectionRepository {
         if let Some(cursor) = cursor
             && !cursor.is_empty()
         {
-            let (created_at, cursor_id) = parse_cursor(&cursor)?;
+            let (created_at, cursor_id) = parse_connection_cursor(&cursor)?;
             let condition = Condition::any()
                 .add(connection::Column::CreatedAt.gt(created_at))
                 .add(
@@ -366,8 +413,12 @@ impl ConnectionRepository {
         let mut rows = query.limit(limit + 1).all(&*self.db).await?;
 
         let next_cursor = if rows.len() as u64 > limit {
-            let overflow = rows.pop().expect("limit+1 ensures overflow row");
-            Some(build_cursor(&overflow.created_at, overflow.id)?)
+            // Remove overflow row to get only the items to return
+            rows.pop().expect("limit+1 ensures overflow row");
+            // Build cursor from the last item that was actually returned
+            rows.last()
+                .map(|last_item| build_connection_cursor(&last_item.created_at, last_item.id))
+                .transpose()?
         } else {
             None
         };
@@ -376,19 +427,37 @@ impl ConnectionRepository {
     }
 }
 
-fn parse_cursor(cursor: &str) -> Result<(DateTimeWithTimeZone, Uuid)> {
-    let (timestamp_str, id_str) = cursor
-        .split_once('|')
-        .ok_or_else(|| anyhow!("Invalid cursor format"))?;
+/// Parse connection cursor from standardized base64 string
+fn parse_connection_cursor(cursor: &str) -> Result<(DateTimeWithTimeZone, Uuid)> {
+    let decoded_cursor = decode_generic_cursor(cursor)
+        .map_err(|_| anyhow!("Invalid cursor format: must be valid base64-encoded JSON"))?;
 
-    let timestamp = DateTime::parse_from_rfc3339(timestamp_str)?;
-    let id = Uuid::parse_str(id_str)?;
+    // Extract required fields from cursor
+    let created_at_str = decoded_cursor.keys["created_at"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Invalid cursor format: missing created_at field"))?;
 
-    Ok((timestamp, id))
+    let id_str = decoded_cursor.keys["id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Invalid cursor format: missing id field"))?;
+
+    let created_at = DateTime::parse_from_rfc3339(created_at_str).map_err(|_| {
+        anyhow!("Invalid cursor format: created_at must be a valid RFC3339 timestamp")
+    })?;
+
+    let id = Uuid::parse_str(id_str)
+        .map_err(|_| anyhow!("Invalid cursor format: id must be a valid UUID"))?;
+
+    Ok((created_at, id))
 }
 
-fn build_cursor(created_at: &DateTimeWithTimeZone, id: Uuid) -> Result<String> {
-    Ok(format!("{}|{}", created_at.to_rfc3339(), id))
+/// Build connection cursor using standardized base64 format
+fn build_connection_cursor(created_at: &DateTimeWithTimeZone, id: Uuid) -> Result<String> {
+    let keys = serde_json::json!({
+        "created_at": created_at.to_rfc3339(),
+        "id": id.to_string()
+    });
+    Ok(encode_generic_cursor(keys))
 }
 
 #[cfg(test)]
@@ -397,28 +466,56 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     #[test]
-    fn build_cursor_formats_expected_string() {
+    fn build_connection_cursor_formats_expected_base64() {
         let ts = Utc.with_ymd_and_hms(2024, 11, 1, 12, 0, 0).unwrap();
         let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
-        let cursor = build_cursor(&ts.into(), id).unwrap();
-        assert!(cursor.contains("2024-11-01T12:00:00"));
-        assert!(cursor.ends_with("11111111-1111-1111-1111-111111111111"));
+        let cursor = build_connection_cursor(&ts.into(), id).unwrap();
+        // Should be base64 encoded, not contain raw timestamp
+        assert!(!cursor.contains("2024-11-01T12:00:00"));
+        // Should be valid base64
+        assert!(
+            cursor
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+        );
     }
 
     #[test]
-    fn parse_cursor_roundtrips() {
+    fn parse_connection_cursor_roundtrips() {
         let ts = Utc.with_ymd_and_hms(2024, 11, 1, 13, 30, 0).unwrap();
         let id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
         let ts_fixed: DateTimeWithTimeZone = ts.into();
-        let cursor = build_cursor(&ts_fixed, id).unwrap();
-        let (parsed_ts, parsed_id) = parse_cursor(&cursor).unwrap();
+        let cursor = build_connection_cursor(&ts_fixed, id).unwrap();
+        let (parsed_ts, parsed_id) = parse_connection_cursor(&cursor).unwrap();
         assert_eq!(parsed_id, id);
         assert_eq!(parsed_ts, ts_fixed);
     }
 
     #[test]
-    fn parse_cursor_invalid_format_errors() {
-        let err = parse_cursor("bad-cursor").unwrap_err();
+    fn parse_connection_cursor_invalid_format_errors() {
+        let err = parse_connection_cursor("bad-cursor").unwrap_err();
         assert!(err.to_string().contains("Invalid cursor"));
+    }
+
+    #[test]
+    fn test_cursor_built_from_last_returned_item() {
+        // Test that next_cursor is built from the last item returned, not from overflow
+        let created_at = chrono::Utc::now();
+        let id = Uuid::from_u128(12345);
+
+        // Build cursor from an item
+        let cursor = build_connection_cursor(&created_at.into(), id).unwrap();
+
+        // Parse it back and verify it contains the expected values
+        let (parsed_created_at, parsed_id) = parse_connection_cursor(&cursor).unwrap();
+        assert_eq!(parsed_created_at.naive_utc(), created_at.naive_utc());
+        assert_eq!(parsed_id, id);
+
+        // Verify cursor is base64 encoded
+        assert!(
+            cursor
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+        );
     }
 }

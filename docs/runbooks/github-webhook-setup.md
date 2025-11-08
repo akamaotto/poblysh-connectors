@@ -107,7 +107,7 @@ The GitHub connector maps webhook events to normalized signal types:
 | `issues` | `closed` | `issue_closed` | Issue closed |
 | `issues` | `reopened` | `issue_reopened` | Issue reopened |
 | `issues` | `edited` | `issue_updated` | Issue updated |
-| `pull_request` | `opened` | `pr_created` | Pull request opened |
+| `pull_request` | `opened` | `pr_opened` | Pull request opened |
 | `pull_request` | `closed` (merged) | `pr_merged` | Pull request merged |
 | `pull_request` | `closed` (not merged) | `pr_closed` | Pull request closed |
 | `pull_request` | `reopened` | `pr_reopened` | Pull request reopened |

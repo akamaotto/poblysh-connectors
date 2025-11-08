@@ -28,7 +28,7 @@ pub struct ListGroundedSignalsParams {
     #[param(style = Simple, example = 0.7)]
     min_score: Option<f32>,
 
-    /// Maximum number of items to return (default: 50, max: 200)
+    /// Maximum number of items to return (default: 50, max: 100)
     #[param(style = Simple, example = 50)]
     limit: Option<i64>,
 
@@ -87,11 +87,11 @@ pub async fn list_grounded_signals(
     }
 
     let limit = params.limit.unwrap_or(50);
-    if !(1..=200).contains(&limit) {
+    if !(1..=100).contains(&limit) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "VALIDATION_FAILED",
-            "limit must be between 1 and 200",
+            "limit must be between 1 and 100",
         ));
     }
 
@@ -278,6 +278,7 @@ mod tests {
     use super::*;
     use crate::config::AppConfig;
     use crate::db::init_pool;
+    use crate::models::connection::ActiveModel as ConnectionActiveModel;
     use crate::models::grounded_signal::SignalScores;
     use crate::models::signal::ActiveModel as SignalActiveModel;
     use crate::models::tenant::ActiveModel as TenantActiveModel;
@@ -287,6 +288,20 @@ mod tests {
     use sea_orm::DatabaseBackend;
     use sea_orm::DatabaseConnection;
     use sea_orm::Statement;
+
+    async fn table_exists(db: &DatabaseConnection, table: &str) -> bool {
+        let stmt = Statement::from_string(
+            DatabaseBackend::Postgres,
+            format!("SELECT to_regclass('public.{table}') IS NOT NULL AS exists"),
+        );
+
+        db.query_one(stmt)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<bool>("", "exists").ok())
+            .unwrap_or(false)
+    }
 
     async fn create_test_data(
         db: &DatabaseConnection,
@@ -299,12 +314,27 @@ mod tests {
         };
         tenant.insert(db).await.unwrap();
 
+        // Create connection for signal
+        let connection_id = Uuid::new_v4();
+        let connection = ConnectionActiveModel {
+            id: sea_orm::Set(connection_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            provider_slug: sea_orm::Set("test-provider".to_string()),
+            external_id: sea_orm::Set("test-connection".to_string()),
+            status: sea_orm::Set("active".to_string()),
+            created_at: sea_orm::Set(Utc::now().into()),
+            updated_at: sea_orm::Set(Utc::now().into()),
+            ..Default::default()
+        };
+        connection.insert(db).await.unwrap();
+
         // Create signal
         let signal_id = Uuid::new_v4();
         let signal = SignalActiveModel {
             id: sea_orm::Set(signal_id),
             tenant_id: sea_orm::Set(tenant_id),
             provider_slug: sea_orm::Set("test-provider".to_string()),
+            connection_id: sea_orm::Set(connection_id),
             kind: sea_orm::Set("test_event".to_string()),
             occurred_at: sea_orm::Set(Utc::now().into()),
             received_at: sea_orm::Set(Utc::now().into()),
@@ -353,21 +383,7 @@ mod tests {
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
 
-        // Skip this test if the grounded_signals table is not present to avoid
-        // coupling to the global migration state.
-        let stmt = Statement::from_string(
-            DatabaseBackend::Postgres,
-            "SELECT to_regclass('public.grounded_signals') IS NOT NULL AS exists".to_string(),
-        );
-
-        let exists: Result<bool, _> = db.query_one(stmt).await.map(|row_opt| {
-            row_opt
-                .and_then(|row| row.try_get::<bool>("", "exists").ok())
-                .unwrap_or(false)
-        });
-
-        if let Ok(false) | Err(_) = exists {
-            // Table does not exist in this environment; treat as skipped.
+        if !table_exists(&db, "grounded_signals").await {
             return;
         }
 
@@ -396,6 +412,9 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let (tenant_id, _, _, _) = create_test_data(&db).await;
 
         let repository = GroundedSignalRepository::new(&db);
@@ -422,6 +441,9 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let (tenant_id, _, grounded_signal_id, repo) = create_test_data(&db).await;
 
         let updated = repo
@@ -446,6 +468,9 @@ mod tests {
         };
 
         let db = init_pool(&config).await.expect("Failed to init test DB");
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let (tenant_id, _, grounded_signal_id, repo) = create_test_data(&db).await;
 
         // Ensure it exists

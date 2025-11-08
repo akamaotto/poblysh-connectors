@@ -5,27 +5,53 @@ A Rust-based API service for managing connectors, built with Axum and featuring 
 ## Prerequisites
 
 - Rust toolchain (latest stable version recommended)
-- PostgreSQL database (for local development)
 
-## Local Run
+## Local Development
 
-To run the project locally:
+### Quick Start
+
+For local development, the project includes `Makefile` and `Justfile` with consistent targets. The recommended workflow uses SQLite by default and requires no external database setup.
 
 ```bash
-# Set up database (required for first run)
-export POBLYSH_DATABASE_URL="postgresql://username:password@localhost/database_name"
+# Using make (recommended)
+make env && make db-sqlite && make migrate && make run
 
-# Run the service
-cargo run
+# Or using just
+just env && just db-sqlite && just migrate && just run
 ```
 
-The server will start on the address specified by the `POBLYSH_API_BIND_ADDR` environment variable (default: `0.0.0.0:8080`).
+### Available Commands
 
-### Database Setup
+Both `make` and `just` support the same set of targets:
 
-For local development, you'll need a PostgreSQL database. The service will automatically run migrations for `local` and `test` profiles.
+| Command | Description |
+|---------|-------------|
+| `make help` / `just` | Show all available commands |
+| `make setup` / `just setup` | Check core prerequisites and suggest optional tools |
+| `make env` / `just env` | Create/update `.env.local` with SQLite defaults |
+| `make db-sqlite` / `just db-sqlite` | Ensure local SQLite database file exists |
+| `make db-pg-check` / `just db-pg-check` | Optional Postgres connectivity check |
+| `make migrate` / `just migrate` | Run database migrations (idempotent) |
+| `make run` / `just run` | Start the API |
+| `make watch` / `just watch` | Start dev loop with hot reload (requires cargo-watch) |
+| `make test` / `just test` | Run tests |
+| `make lint` / `just lint` | Run clippy with -D warnings |
+| `make fmt` / `just fmt` | Format code |
+| `make openapi` / `just openapi` | Export OpenAPI spec to `openapi.json` |
+| `make smoke` / `just smoke` | Run E2E smoke tests against the real binary |
 
-#### Using Docker (recommended)
+### Environment Configuration
+
+The `make env` / `just env` command creates `.env.local` with sensible defaults:
+
+- `POBLYSH_PROFILE=local`
+- `POBLYSH_DATABASE_URL=sqlite://dev.db`
+- `POBLYSH_OPERATOR_TOKEN=local-dev-token`
+- `POBLYSH_CRYPTO_KEY=<generated-32-byte-base64-key>`
+
+### Optional: PostgreSQL Setup
+
+While SQLite is the default for local development, you can optionally use PostgreSQL:
 
 ```bash
 # Start PostgreSQL container
@@ -36,9 +62,114 @@ docker run --name postgres-dev \
   -p 5432:5432 \
   -d postgres:15
 
-# Set environment variable
-export POBLYSH_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/poblysh"
+# Override the database URL in .env.local
+echo "POBLYSH_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/poblysh" >> .env.local
+
+# Test Postgres connectivity (optional)
+make db-pg-check
 ```
+
+### Tooling Notes
+
+- **cargo-watch**: Install with `cargo install cargo-watch` for the `watch` command
+- **curl**: Required for `openapi` command
+- **jq**: Recommended for validating JSON output in `openapi`
+- **just**: Optional task runner (https://just.systems)
+
+The scripts handle missing optional tools gracefully with clear installation guidance.
+
+### E2E Smoke Tests
+
+The project includes comprehensive end-to-end smoke tests that validate the real binary startup, database connectivity, and core HTTP endpoints.
+
+**Prerequisites:**
+- `POBLYSH_DATABASE_URL` set (PostgreSQL or SQLite)
+- `POBLYSH_OPERATOR_TOKEN` set for protected endpoint testing
+
+**Running Smoke Tests:**
+
+```bash
+# Using make
+make smoke
+
+# Using just
+just smoke
+
+# Or with cargo directly
+POBLYSH_DATABASE_URL=sqlite://dev.db \
+POBLYSH_OPERATOR_TOKEN=local-dev-token \
+cargo test --test e2e_smoke_tests -- --test-threads=1
+```
+
+**What the smoke tests validate:**
+- Binary startup and configuration loading
+- Database connectivity and migrations
+- Readiness endpoint (`/readyz`) with timeout handling
+- Core public endpoints: `/`, `/healthz`, `/readyz`, `/openapi.json`, `/providers`
+- Protected endpoint (`/protected/ping`) with authentication and tenant headers
+- Graceful shutdown and cleanup
+
+**Database Options:**
+- **PostgreSQL (recommended):** `postgresql://postgres:postgres@localhost:5432/poblysh`
+- **SQLite (development):** `sqlite://dev.db`
+
+**Docker PostgreSQL for smoke tests:**
+```bash
+docker run --name postgres-dev \
+  -e POSTGRES_DB=poblysh \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  -d postgres:15
+
+# Then run smoke tests
+export POBLYSH_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/poblysh
+export POBLYSH_OPERATOR_TOKEN=local-dev-token
+make smoke
+```
+
+The smoke tests use `assert_cmd` for reliable binary path resolution and `portpicker` for deterministic port selection, providing fast and reliable validation of the complete service stack.
+
+## Docker Build & Swagger UI Testing
+
+To validate the dockerized workflow and manually exercise the Swagger UI surface, follow these steps every time you ship the `add-dockerization-post-mvp` change or a follow-up.
+
+### 1. Build the Docker image
+
+```bash
+docker build --pull -t connectors:local .
+```
+
+The repository’s `Dockerfile` uses a multi-stage build (Rust builder + slim runtime). The `--pull` flag ensures the base images are refreshed before building.
+
+### 2. Run the container locally
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e POBLYSH_PROFILE=local \
+  -e POBLYSH_DATABASE_URL=sqlite://dev.db \
+  -e POBLYSH_OPERATOR_TOKEN=local-dev-token \
+  -e POBLYSH_CRYPTO_KEY="$(openssl rand -base64 32)" \
+  -v "$PWD/dev.db:/app/dev.db" \
+  connectors:local
+```
+
+Adjust `POBLYSH_DATABASE_URL` to point at a Postgres instance when you need to test migrations (`postgresql://pbl:secret@localhost:5432/connectors` for local containers). The bind mount keeps the SQLite file in sync with your host so you can inspect migrations after the run.
+
+Watch the logs for a message confirming `/readyz` is passing before moving on to the Swagger UI.
+
+### 3. Manual Swagger UI checklist
+
+Once the container is running on `http://localhost:8080`, open `http://localhost:8080/docs` and run the following manual checks in Swagger UI:
+
+- Use the **Authorize** button to paste `Bearer <your operator token>` so protected endpoints accept your requests.
+- Execute `GET /healthz`, `/readyz`, `/providers`, `/` and `/openapi.json` via **Try it out**; verify each returns 200 and meaningful payloads.
+- Use `POST /protected/ping` with a generated tenant UUID (e.g., `uuidgen`) and confirm a successful response that proves auth and tenant headers work.
+- Submit a sample webhook via `POST /webhooks/github/{tenant_id}` with a fixture payload (see `tests/fixtures/normalization/github`) and ensure Swagger reports success while the container logs show signal normalization activity.
+- Download `/openapi.json` from the UI and run `curl -fsS http://localhost:8080/openapi.json | jq .info.title` to confirm the spec matches expectations.
+- Keep an eye on the container logs (`docker logs <container>`) for startup/migration errors or schema validation defects while you interact with the UI.
+
+When you’re finished, stop the container with `Ctrl+C` and mention the steps you ran in PR descriptions so reviewers know the Docker and Swagger workflow has been validated.
 
 ## Configuration System
 
@@ -65,7 +196,7 @@ Configuration keys use the `POBLYSH_` prefix. The MVP fields are:
 - `POBLYSH_DATABASE_URL` – PostgreSQL connection string (required)
 - `POBLYSH_DB_MAX_CONNECTIONS` – maximum database connections (default: 10)
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS` – connection acquire timeout in milliseconds (default: 5000)
-- `POBLYSH_CRYPTO_KEY` – base64-encoded 32 byte key used to encrypt access/refresh tokens (required)
+- `POBLYSH_CRYPTO_KEY` – base64-encoded 32 byte key used to encrypt access/refresh tokens (required). See [Crypto Key Rotation Guide](docs/runbooks/local-crypto-rotation.md) for rotation procedures.
 
 ### Mail Spam Filtering
 
@@ -159,7 +290,7 @@ cargo run --bin reencrypt_plaintext_tokens
 - `POBLYSH_DATABASE_URL`: PostgreSQL connection string (required)
 - `POBLYSH_DB_MAX_CONNECTIONS`: Maximum database connections (default: 10)
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS`: Connection acquire timeout in milliseconds (default: 5000)
-- `POBLYSH_CRYPTO_KEY`: Base64 string that decodes to 32 bytes; required to encrypt/decrypt stored tokens. Generate with `openssl rand -base64 32`.
+- `POBLYSH_CRYPTO_KEY`: Base64 string that decodes to 32 bytes; required to encrypt/decrypt stored tokens. Generate with `openssl rand -base64 32`. See [Crypto Key Rotation Guide](docs/runbooks/local-crypto-rotation.md) for rotation procedures.
 
 Examples:
 ```bash

@@ -19,3 +19,6 @@ pub mod tenant_isolation_tests;
 
 // Re-export existing test modules
 pub mod integration;
+
+#[allow(clippy::duplicate_mod)]
+pub mod normalization_integration_tests;

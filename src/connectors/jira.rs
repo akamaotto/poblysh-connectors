@@ -27,6 +27,7 @@ use crate::connectors::{
     trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::{SignalKind, normalize_jira_webhook_kind};
 
 /// Jira connector
 pub struct JiraConnector {
@@ -617,7 +618,8 @@ impl Connector for JiraConnector {
             });
 
             let normalized = extract_normalized_fields(&stub_payload);
-            let dedupe = generate_dedupe_key(&stub_payload, "issue_updated");
+            let signal_kind = SignalKind::IssueUpdated;
+            let dedupe = generate_dedupe_key(&stub_payload, signal_kind.as_str());
             let occurred_at = DateTime::from(extract_event_timestamp(&stub_payload));
             let received_at = DateTime::from(now_utc);
 
@@ -626,7 +628,7 @@ impl Connector for JiraConnector {
                 tenant_id: params.connection.tenant_id,
                 provider_slug: "jira".to_string(),
                 connection_id: params.connection.id,
-                kind: "issue_updated".to_string(),
+                kind: signal_kind.as_str().to_string(),
                 occurred_at,
                 received_at,
                 payload: normalized,
@@ -872,14 +874,15 @@ impl Connector for JiraConnector {
                 });
 
                 let normalized = extract_normalized_fields(&payload);
-                let dedupe = generate_dedupe_key(&payload, "issue_updated");
+                let signal_kind = SignalKind::IssueUpdated;
+                let dedupe = generate_dedupe_key(&payload, signal_kind.as_str());
 
                 all_signals.push(Signal {
                     id: Uuid::new_v4(),
                     tenant_id: params.connection.tenant_id,
                     provider_slug: "jira".to_string(),
                     connection_id: params.connection.id,
-                    kind: "issue_updated".to_string(),
+                    kind: signal_kind.as_str().to_string(),
                     occurred_at: updated_dt.into(),
                     received_at: now,
                     payload: normalized,
@@ -941,14 +944,7 @@ impl Connector for JiraConnector {
             "Processing Jira webhook"
         );
 
-        let kind = match event_type {
-            // Typical Jira webhook event keys
-            "jira:issue_created" => Some("issue_created"),
-            "jira:issue_updated" => Some("issue_updated"),
-            _ => None,
-        };
-
-        if let Some(kind) = kind {
+        if let Some(kind) = normalize_jira_webhook_kind(&params.payload) {
             info!(
                 tenant_id = %params.tenant_id,
                 event_type = %event_type,
@@ -965,11 +961,11 @@ impl Connector for JiraConnector {
                 tenant_id: params.tenant_id,
                 provider_slug: "jira".to_string(),
                 connection_id: Uuid::new_v4(),
-                kind: kind.to_string(),
+                kind: kind.as_str().to_string(),
                 occurred_at,
                 received_at,
                 payload: normalized_payload,
-                dedupe_key: Some(generate_dedupe_key(&params.payload, kind)),
+                dedupe_key: Some(generate_dedupe_key(&params.payload, kind.as_str())),
                 created_at: received_at,
                 updated_at: received_at,
             }])

@@ -23,16 +23,25 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Connections::TenantId).uuid().not_null())
-                    .col(
-                        ColumnDef::new(Connections::ProviderSlug)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Connections::ProviderSlug).text().not_null())
                     .col(ColumnDef::new(Connections::ExternalId).text().not_null())
                     .col(ColumnDef::new(Connections::DisplayName).text().null())
-                    .col(ColumnDef::new(Connections::Status).text().not_null().default("active"))
-                    .col(ColumnDef::new(Connections::AccessTokenCiphertext).binary().null())
-                    .col(ColumnDef::new(Connections::RefreshTokenCiphertext).binary().null())
+                    .col(
+                        ColumnDef::new(Connections::Status)
+                            .text()
+                            .not_null()
+                            .default("active"),
+                    )
+                    .col(
+                        ColumnDef::new(Connections::AccessTokenCiphertext)
+                            .binary()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(Connections::RefreshTokenCiphertext)
+                            .binary()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(Connections::ExpiresAt)
                             .timestamp_with_time_zone()
@@ -109,11 +118,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
-            .drop_index(
-                Index::drop()
-                    .name("idx_connections_tenant_id")
-                    .to_owned(),
-            )
+            .drop_index(Index::drop().name("idx_connections_tenant_id").to_owned())
             .await?;
 
         // Then drop table

@@ -110,7 +110,7 @@ pub async fn start_oauth(
                 return Err(ApiError::new(
                     StatusCode::NOT_FOUND,
                     "NOT_FOUND",
-                    &format!("provider '{}' not found", name),
+                    format!("provider '{}' not found", name),
                 ));
             }
         }
@@ -302,7 +302,7 @@ pub async fn oauth_callback(
                 return Err(ApiError::new(
                     StatusCode::NOT_FOUND,
                     "NOT_FOUND",
-                    &format!("provider '{}' not found", name),
+                    format!("provider '{}' not found", name),
                 ));
             }
         }
@@ -405,7 +405,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Provider {} returned HTTP {}", provider, status),
+                    format!("Provider {} returned HTTP {}", provider, status),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -426,7 +426,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Provider {} returned malformed response", provider),
+                    format!("Provider {} returned malformed response", provider),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -443,7 +443,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Network error connecting to {}: {}", provider, details),
+                    format!("Network error connecting to {}: {}", provider, details),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -472,7 +472,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Authentication error with {}: {}", provider, details),
+                    format!("Authentication error with {}: {}", provider, details),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -489,7 +489,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Rate limited by {}", provider),
+                    format!("Rate limited by {}", provider),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -506,7 +506,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "INTERNAL_SERVER_ERROR",
-                    &format!("Connector configuration error: {}", details),
+                    format!("Connector configuration error: {}", details),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -521,7 +521,7 @@ fn handle_connector_error(
                 ApiError::new(
                     StatusCode::BAD_GATEWAY,
                     "PROVIDER_ERROR",
-                    &format!("Unknown error from {}: {}", provider, details),
+                    format!("Unknown error from {}: {}", provider, details),
                 )
                 .with_details(serde_json::json!({
                     "provider": {
@@ -594,7 +594,7 @@ fn handle_legacy_connector_error(
     ApiError::new(
         StatusCode::BAD_GATEWAY,
         "PROVIDER_ERROR",
-        &format!("Provider {} error: {}", provider, message),
+        format!("Provider {} error: {}", provider, message),
     )
     .with_details(serde_json::json!({
         "provider": {

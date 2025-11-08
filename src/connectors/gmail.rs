@@ -23,6 +23,7 @@ use crate::connectors::{
     metadata::{AuthType, ProviderMetadata},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::SignalKind;
 
 /// Default Gmail OAuth scopes
 pub const DEFAULT_GMAIL_SCOPES: &[&str] = &["https://www.googleapis.com/auth/gmail.readonly"];
@@ -789,13 +790,13 @@ impl GmailConnector {
             .map(|msgs| !msgs.is_empty())
             .unwrap_or(false);
 
-        let signal_type = if deleted {
-            "email_deleted"
+        let signal_kind = if deleted {
+            SignalKind::EmailDeleted
         } else {
-            "email_updated"
+            SignalKind::EmailUpdated
         };
 
-        signals.push(self.create_email_signal_from_record(connection, signal_type, &record)?);
+        signals.push(self.create_email_signal_from_record(connection, signal_kind, &record)?);
 
         Ok(signals)
     }
@@ -844,7 +845,7 @@ impl GmailConnector {
     fn create_email_signal_from_record(
         &self,
         connection: &Connection,
-        signal_type: &str,
+        signal_kind: SignalKind,
         record: &GmailHistoryRecord,
     ) -> Result<Signal, GmailError> {
         let dedupe_key = format!("gmail:{}:{}", connection.id, record.history_id);
@@ -852,7 +853,7 @@ impl GmailConnector {
         let mut payload = serde_json::Map::new();
         payload.insert(
             "signal_type".to_string(),
-            serde_json::Value::String(signal_type.to_string()),
+            serde_json::Value::String(signal_kind.as_str().to_string()),
         );
         payload.insert(
             "history_id".to_string(),
@@ -888,7 +889,7 @@ impl GmailConnector {
             tenant_id: connection.tenant_id,
             provider_slug: "gmail".to_string(),
             connection_id: connection.id,
-            kind: signal_type.to_string(),
+            kind: signal_kind.as_str().to_string(),
             occurred_at: chrono::Utc::now().into(),
             received_at: chrono::Utc::now().into(),
             payload: serde_json::to_value(payload).unwrap(),

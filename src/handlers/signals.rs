@@ -78,7 +78,19 @@ pub struct SignalsResponse {
     security(("bearer_auth" = [])),
     params(ListSignalsQuery),
     responses(
-        (status = 200, description = "Signals listed successfully", body = SignalsResponse),
+        (status = 200, description = "Signals listed successfully", body = SignalsResponse, example = json!({
+            "signals": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "provider_slug": "github",
+                    "connection_id": "550e8400-e29b-41d4-a716-446655440001",
+                    "kind": "issue_created",
+                    "occurred_at": "2024-01-15T10:30:00Z",
+                    "received_at": "2024-01-15T10:30:05Z"
+                }
+            ],
+            "next_cursor": "eyJ2ZXJzaW9uIjoxLCJrZXlzIjp7Im9jY3VycmVkX2F0IjoiMjAyNC0wMS0xNVQxMDozMDowMFoiLCJpZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMCJ9fQ=="
+        })),
         (status = 400, description = "Invalid query parameters", body = ApiError, example = json!({
             "status": 400,
             "code": "VALIDATION_FAILED",
@@ -252,7 +264,7 @@ pub async fn list_signals(
                     ApiError::new(
                         StatusCode::NOT_FOUND,
                         "NOT_FOUND",
-                        &format!("Requested resource not found: {}", msg),
+                        format!("Requested resource not found: {}", msg),
                     )
                 }
                 crate::error::RepositoryError::Validation(msg) => {
@@ -260,7 +272,7 @@ pub async fn list_signals(
                     ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "VALIDATION_FAILED",
-                        &format!("Query validation failed: {}", msg),
+                        format!("Query validation failed: {}", msg),
                     )
                 }
             }

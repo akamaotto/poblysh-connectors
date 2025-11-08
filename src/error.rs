@@ -228,7 +228,7 @@ impl From<ErrorType> for ApiError {
         Self::new(
             error_type.status_code(),
             error_type.error_code(),
-            &error_type.to_string(),
+            error_type.to_string(),
         )
     }
 }
@@ -265,47 +265,57 @@ impl From<crate::webhook_verification::VerificationError> for ApiError {
     fn from(error: crate::webhook_verification::VerificationError) -> Self {
         use crate::webhook_verification::VerificationError;
 
-        let message = match &error {
-            VerificationError::MissingSignature { header } => {
-                format!("Missing required signature header: {}", header)
-            }
-            VerificationError::InvalidSignatureFormat { header } => {
-                format!("Invalid signature format: {}", header)
-            }
-            VerificationError::VerificationFailed => "Signature verification failed".to_string(),
-            VerificationError::MissingTimestamp { header } => {
-                format!("Missing required timestamp header: {}", header)
-            }
-            VerificationError::InvalidTimestamp { header } => {
-                format!("Invalid timestamp format: {}", header)
-            }
+        let (code, message) = match &error {
+            VerificationError::MissingSignature { header } => (
+                "INVALID_SIGNATURE",
+                format!("Missing required signature header: {}", header),
+            ),
+            VerificationError::InvalidSignatureFormat { header } => (
+                "INVALID_SIGNATURE",
+                format!("Invalid signature format: {}", header),
+            ),
+            VerificationError::VerificationFailed => (
+                "INVALID_SIGNATURE",
+                "Signature verification failed".to_string(),
+            ),
+            VerificationError::MissingTimestamp { header } => (
+                "INVALID_SIGNATURE",
+                format!("Missing required timestamp header: {}", header),
+            ),
+            VerificationError::InvalidTimestamp { header } => (
+                "INVALID_SIGNATURE",
+                format!("Invalid timestamp format: {}", header),
+            ),
             VerificationError::TimestampTooOld {
                 seconds,
                 max_seconds,
-            } => {
-                format!("Timestamp too old: {}s (max: {}s)", seconds, max_seconds)
-            }
+            } => (
+                "REPLAY_ATTACK_DETECTED",
+                format!("Timestamp too old: {}s (max: {}s)", seconds, max_seconds),
+            ),
             VerificationError::TimestampTooFuture {
                 seconds,
                 max_seconds,
-            } => {
+            } => (
+                "REPLAY_ATTACK_DETECTED",
                 format!(
                     "Timestamp too far in future: {}s (max: {}s)",
                     seconds, max_seconds
-                )
-            }
+                ),
+            ),
             VerificationError::UnsupportedProvider { provider } => {
-                format!("Unsupported provider: {}", provider)
+                ("NOT_FOUND", format!("Unsupported provider: {}", provider))
             }
-            VerificationError::NotConfigured { provider } => {
+            VerificationError::NotConfigured { provider } => (
+                "UNAUTHORIZED",
                 format!(
                     "Webhook verification not configured for provider: {}",
                     provider
-                )
-            }
+                ),
+            ),
         };
 
-        Self::new(error.status_code(), "WEBHOOK_VERIFICATION_FAILED", &message)
+        Self::new(error.status_code(), code, &message)
     }
 }
 
@@ -320,7 +330,7 @@ impl From<sea_orm::DbErr> for ApiError {
             sea_orm::DbErr::RecordNotFound(record) => Self::new(
                 StatusCode::NOT_FOUND,
                 "NOT_FOUND",
-                &format!("Record not found: {}", record),
+                format!("Record not found: {}", record),
             ),
             sea_orm::DbErr::Query(query_err) => {
                 tracing::error!("Database query error: {:?}", query_err);
@@ -381,7 +391,7 @@ pub fn provider_error(provider: String, status: u16, body: Option<String>) -> Ap
     ApiError::new(
         api_status,
         api_code,
-        &format!("Provider {} returned error status {}", provider, status),
+        format!("Provider {} returned error status {}", provider, status),
     )
     .with_details(json!(provider_error))
 }

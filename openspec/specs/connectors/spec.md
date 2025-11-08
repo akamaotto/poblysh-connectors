@@ -506,3 +506,43 @@ The system SHALL provide a Zoho Mail connector that supports OAuth2 authorizatio
   - `POBLYSH_ZOHO_MAIL_DEDUPE_WINDOW_SECS` and `POBLYSH_ZOHO_MAIL_HTTP_TIMEOUT_SECS` are valid positive integers
 - AND fails fast with a clear configuration error if any required value is invalid or missing
 
+### Requirement: Shared Mail Spam Filtering
+Mail connectors SHALL use a shared spam filtering abstraction to drop malicious messages while allowing promotional or collaboration threads to proceed through the signal pipeline.
+
+#### Scenario: Centralized filter evaluated before emitting signals
+- **WHEN** a mail connector (e.g., Gmail, Zoho Mail, Outlook) processes an inbound message
+- **THEN** it MUST invoke the shared `MailSpamFilter` with provider metadata before emitting any Signals, and skip signal generation when the verdict is spam
+
+#### Scenario: Configurable thresholds and allowlists
+- **WHEN** operators set `POBLYSH_MAIL_SPAM_THRESHOLD`, `POBLYSH_MAIL_SPAM_ALLOWLIST`, or `POBLYSH_MAIL_SPAM_DENYLIST`
+- **THEN** the shared filter honors those values without requiring code changes in individual connectors
+
+#### Scenario: Telemetry for rejected messages
+- **WHEN** a message is dropped as spam
+- **THEN** the connector logs provider, score, and reason so teams can audit and tune spam heuristics
+
+### Requirement: Weak Signal Engine
+The platform SHALL provide a weak-signal engine that:
+- Consumes normalized Signals from any connector, scoped by tenant.
+- Scores candidates using the six-dimension model.
+- Promotes high-confidence candidates into grounded signals with actionable recommendations.
+- Ensures tenant isolation, durable evidence for audit, and idempotent creation semantics.
+
+#### Scenario: Signals are scored and grounded
+- **WHEN** a normalized Signal is emitted by any connector for a given tenant
+- **THEN** the weak-signal engine evaluates it using the six-dimension scoring model and, when the total score exceeds the configured (global or per-tenant) threshold, creates a grounded signal for that tenant with:
+  - A score breakdown across all six dimensions,
+  - Evidence that includes traceable references to contributing Signal IDs and source systems,
+  - Recommended next steps for operators.
+
+#### Scenario: Notifications for PR teams
+- **WHEN** a grounded signal is created
+- **THEN** the system emits an event/log/webhook scoped to the owning tenant that PR teams can subscribe to so they are notified of potential stories before the originating department reports them manually
+- **AND** implementations MUST use HTTPS endpoints, MUST NOT log webhook secrets or bearer tokens, and SHOULD avoid logging full webhook URLs containing sensitive data.
+
+#### Scenario: Querying grounded signals
+- **WHEN** operators call the `/grounded-signals` endpoint with `tenant_id` and optional filters
+- **THEN** they receive only grounded signals for that `tenant_id`, including score breakdown, evidence summaries, status, and pagination so they can prioritize follow-up work
+- **AND** the API MUST enforce tenant isolation server-side (ignoring or rejecting any cross-tenant filters)
+- **AND** repeated processing of the same underlying signals or clusters MUST NOT create duplicate grounded signals, using an idempotency mechanism defined in the design.
+

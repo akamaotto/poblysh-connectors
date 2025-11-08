@@ -209,7 +209,7 @@ fn verify_gmail_webhook_oidc(
             return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_SERVER_ERROR",
-                &format!(
+                format!(
                     "Gmail OIDC verification is required but missing configuration: {}",
                     missing_fields
                 ),
@@ -247,7 +247,7 @@ fn verify_gmail_webhook_oidc(
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "UNAUTHORIZED",
-                &format!("OIDC token verification failed: {}", e),
+                format!("OIDC token verification failed: {}", e),
             )
         })?;
 
@@ -266,7 +266,7 @@ fn validate_gmail_webhook_body_size(
         return Err(ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "PAYLOAD_TOO_LARGE",
-            &format!(
+            format!(
                 "Webhook body size {} bytes exceeds maximum allowed size {} KB",
                 body_bytes.len(),
                 max_size_kb
@@ -392,7 +392,7 @@ pub async fn ingest_webhook(
             ApiError::new(
                 axum::http::StatusCode::NOT_FOUND,
                 "NOT_FOUND",
-                &format!("provider '{}' not found", provider_slug),
+                format!("provider '{}' not found", provider_slug),
             )
         })?;
 
@@ -496,30 +496,44 @@ pub async fn ingest_webhook(
 
 /// Accept webhook from external provider via public route with signature verification
 ///
-/// This endpoint receives webhook callbacks from external providers without requiring
-/// operator authentication when a valid provider signature is present. The tenant_id
-/// is provided in the URL path to convey tenant context.
+/// This endpoint receives webhook callbacks from external providers with flexible authentication:
+/// 1. **Operator Auth Override**: Valid operator bearer token (`Authorization: Bearer <token>`) bypasses signature verification
+/// 2. **Signature Verification**: Provider-specific signatures are verified when no operator auth is present
+/// 3. **Tenant Context**: The tenant_id in the URL path provides tenant scoping
 ///
-/// **Zoho Cliq Usage**: Configure Zoho Cliq outgoing webhooks to point to:
-/// `POST /webhooks/zoho-cliq/{tenant_id}` with Authorization header set to:
-/// `Bearer {POBLYSH_WEBHOOK_ZOHO_CLIQ_TOKEN}`
+/// **Authentication Precedence**:
+/// - If valid operator bearer token is present → Always accepted (signature verification skipped)
+/// - Else if valid provider signature is present → Accepted (signature verification required)
+/// - Else → Rejected with appropriate error
+///
+/// **Provider-Specific Requirements**:
+/// - **GitHub**: `X-Hub-Signature-256: sha256=<hex>` header
+/// - **Slack**: `X-Slack-Signature: v0=<hex>` and `X-Slack-Request-Timestamp` headers
+/// - **Jira/Zoho-Cliq**: `Authorization: Bearer <token>` header
+///
+/// **Error Responses**:
+/// - `401 UNAUTHORIZED`: Missing/invalid signature when no operator auth, or missing verification config
+/// - `404 NOT_FOUND`: Unsupported provider
+/// - `429 RATE_LIMIT_EXCEEDED`: Rate limit exceeded
+/// - All errors use `application/problem+json` format with SCREAMING_SNAKE_CASE codes
 #[utoipa::path(
     post,
     path = "/webhooks/{provider}/{tenant_id}",
     params(
         ("X-Connection-Id" = Option<String>, Header, description = "Optional connection ID to target"),
-        ("Authorization" = Option<String>, Header, description = "Bearer token for webhook verification (required for Zoho Cliq webhooks)"),
-        ("X-Hub-Signature-256" = Option<String>, Header, description = "GitHub HMAC-SHA256 signature (required for GitHub webhooks)"),
-        ("X-Slack-Signature" = Option<String>, Header, description = "Slack HMAC-SHA256 signature (required for Slack webhooks)"),
-        ("X-Slack-Request-Timestamp" = Option<String>, Header, description = "Slack request timestamp (required for Slack webhooks)"),
+        ("Authorization" = Option<String>, Header, description = "Bearer token for operator auth override OR provider-specific verification (e.g., Zoho Cliq webhooks)"),
+        ("X-Hub-Signature-256" = Option<String>, Header, description = "GitHub HMAC-SHA256 signature (required for GitHub webhooks without operator auth)"),
+        ("X-Slack-Signature" = Option<String>, Header, description = "Slack HMAC-SHA256 signature (required for Slack webhooks without operator auth)"),
+        ("X-Slack-Request-Timestamp" = Option<String>, Header, description = "Slack request timestamp (required for Slack webhooks without operator auth)"),
         ProviderTenantPath
     ),
     request_body(content = Option<JsonValue>, description = "Webhook payload (opaque to API)", content_type = "application/json"),
     responses(
-        (status = 202, description = "Webhook accepted with valid signature", body = WebhookAcceptResponse),
-        (status = 400, description = "Invalid connection ID header", body = ApiError),
-        (status = 401, description = "Missing or invalid webhook signature", body = ApiError),
-        (status = 404, description = "Provider not found or connection not found for tenant/provider", body = ApiError),
+        (status = 202, description = "Webhook accepted (either via operator auth or valid signature)", body = WebhookAcceptResponse),
+        (status = 400, description = "Invalid connection ID header or malformed request", body = ApiError),
+        (status = 401, description = "Missing/invalid signature OR webhook verification not configured", body = ApiError),
+        (status = 404, description = "Provider not found or unsupported", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     ),
     tag = "webhooks"
@@ -619,7 +633,7 @@ pub async fn ingest_public_webhook(
             ApiError::new(
                 axum::http::StatusCode::NOT_FOUND,
                 "NOT_FOUND",
-                &format!("provider '{}' not found", provider_slug),
+                format!("provider '{}' not found", provider_slug),
             )
         })?;
 
@@ -720,6 +734,33 @@ pub async fn ingest_public_webhook(
     };
 
     Ok((StatusCode::ACCEPTED, Json(response)))
+}
+
+/// Generate a GitHub HMAC-SHA256 signature for testing
+fn generate_github_signature(body: &str, secret: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    let result = mac.finalize();
+    let digest = hex::encode(result.into_bytes());
+    format!("sha256={}", digest)
+}
+
+/// Generate a Slack v2 signature for testing
+fn generate_slack_signature(body: &str, timestamp: &str, secret: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    type HmacSha256 = Hmac<Sha256>;
+    let base_string = format!("v0:{}:{}", timestamp, body);
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(base_string.as_bytes());
+    let result = mac.finalize();
+    let digest = hex::encode(result.into_bytes());
+    format!("v0={}", digest)
 }
 
 #[cfg(test)]
@@ -1070,5 +1111,266 @@ mod tests {
         // Verify payload is captured
         assert!(cursor.get("webhook_payload").is_some());
         assert!(cursor.get("received_at").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_github_valid_signature_accepted() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_github_secret = Some("test-secret-123".to_string());
+        config.operator_tokens = vec!["operator-token".to_string()];
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "push", "repository": {"name": "test"}}"#;
+        let signature = generate_github_signature(body, "test-secret-123");
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/github/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Hub-Signature-256", signature)
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let webhook_response: WebhookAcceptResponse =
+            serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(webhook_response.status, "accepted");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_github_invalid_signature_rejected() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_github_secret = Some("test-secret-123".to_string());
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "push"}"#;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/github/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Hub-Signature-256", "sha256=invalid_signature")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify it's a proper problem+json response
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error_response: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(error_response["code"], "INVALID_SIGNATURE");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_github_missing_signature_rejected() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_github_secret = Some("test-secret-123".to_string());
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "push"}"#;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/github/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify it's a proper problem+json response
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error_response: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(error_response["code"], "INVALID_SIGNATURE");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_github_operator_auth_overrides_signature() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_github_secret = Some("test-secret-123".to_string());
+        config.operator_tokens = vec!["operator-token".to_string()];
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "push"}"#;
+
+        // Request with valid operator token but invalid/missing signature should be accepted
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/github/{}", tenant_id))
+            .header("Authorization", "Bearer operator-token")
+            .header("Content-Type", "application/json")
+            // No signature header or invalid signature - should be bypassed due to operator auth
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let webhook_response: WebhookAcceptResponse =
+            serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(webhook_response.status, "accepted");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_slack_valid_signature_accepted() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_slack_signing_secret = Some("test-slack-secret".to_string());
+        config.webhook_slack_tolerance_seconds = 300;
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        // Check if slack provider already exists to avoid constraint violation
+        let provider_repo = ProviderRepository::new(std::sync::Arc::new(state.db.clone()));
+        if provider_repo.find_by_slug("slack").await.unwrap().is_none() {
+            create_test_provider(&state, "slack").await;
+        }
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"type": "message", "text": "hello"}"#;
+        let timestamp = (chrono::Utc::now().timestamp()).to_string();
+        let signature = generate_slack_signature(body, &timestamp, "test-slack-secret");
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/slack/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Slack-Signature", signature)
+            .header("X-Slack-Request-Timestamp", timestamp)
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_slack_timestamp_too_old_rejected() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_slack_signing_secret = Some("test-slack-secret".to_string());
+        config.webhook_slack_tolerance_seconds = 300;
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        // Check if slack provider already exists to avoid constraint violation
+        let provider_repo = ProviderRepository::new(std::sync::Arc::new(state.db.clone()));
+        if provider_repo.find_by_slug("slack").await.unwrap().is_none() {
+            create_test_provider(&state, "slack").await;
+        }
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"type": "message"}"#;
+        // Use a timestamp that's 10 minutes ago (outside the 300s tolerance window)
+        let old_timestamp = (chrono::Utc::now().timestamp() - 600).to_string();
+        let signature = generate_slack_signature(body, &old_timestamp, "test-slack-secret");
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/slack/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .header("X-Slack-Signature", signature)
+            .header("X-Slack-Request-Timestamp", old_timestamp)
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify it's a proper problem+json response with REPLAY_ATTACK_DETECTED
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error_response: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(error_response["code"], "REPLAY_ATTACK_DETECTED");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_github_secret_missing_rejected() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        // No GitHub secret configured
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "push"}"#;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/github/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify it's a proper problem+json response
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error_response: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(error_response["code"], "UNAUTHORIZED");
+    }
+
+    #[tokio::test]
+    async fn test_public_webhook_unsupported_provider_returns_404() {
+        let mut config = AppConfig::default();
+        config.profile = "test".to_string();
+        config.webhook_github_secret = Some("test-secret-123".to_string());
+
+        let (state, app) = setup_test_app_with_config(config).await;
+        // Only create github provider, not the unsupported one
+        create_test_provider(&state, "github").await;
+
+        let tenant_id = Uuid::new_v4();
+        let body = r#"{"event": "test"}"#;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/unsupported-provider/{}", tenant_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Verify it's a proper problem+json response
+        let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error_response: serde_json::Value = serde_json::from_slice(&response_body).unwrap();
+        assert_eq!(error_response["code"], "NOT_FOUND");
     }
 }

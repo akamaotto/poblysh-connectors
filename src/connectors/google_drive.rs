@@ -20,7 +20,7 @@
 //!
 //! - `file_created` - New file added (resource_state: "add")
 //! - `file_updated` - File content modified (resource_state: "update")
-//! - `file_trashed` - File moved to trash (resource_state: "trash")
+//! - `file_deleted` - File moved to trash (resource_state: "trash")
 //! - `file_moved` - File moved/renamed (resource_state: "move")
 
 use async_trait::async_trait;
@@ -34,6 +34,7 @@ use crate::connectors::{
     trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::SignalKind;
 
 /// Google Drive connector (MVP stub implementation)
 ///
@@ -141,7 +142,7 @@ impl Connector for GoogleDriveConnector {
                 tenant_id: params.connection.tenant_id,
                 provider_slug: "google-drive".to_string(),
                 connection_id: params.connection.id,
-                kind: "file_updated".to_string(),
+                kind: SignalKind::FileUpdated.as_str().to_string(),
                 occurred_at: now,
                 received_at: now,
                 payload: serde_json::json!({
@@ -177,10 +178,10 @@ impl Connector for GoogleDriveConnector {
             .unwrap_or("");
 
         let kind = match resource_state {
-            "add" => Some("file_created"),
-            "trash" => Some("file_trashed"),
-            "update" => Some("file_updated"),
-            "move" => Some("file_moved"),
+            "add" => Some(SignalKind::FileCreated),
+            "trash" => Some(SignalKind::FileDeleted),
+            "update" => Some(SignalKind::FileUpdated),
+            "move" => Some(SignalKind::FileMoved),
             _ => None,
         };
 
@@ -190,7 +191,7 @@ impl Connector for GoogleDriveConnector {
                 tenant_id: params.tenant_id,
                 provider_slug: "google-drive".to_string(),
                 connection_id: Uuid::new_v4(),
-                kind: kind.to_string(),
+                kind: kind.as_str().to_string(),
                 occurred_at: now,
                 received_at: now,
                 payload: params.payload,

@@ -189,7 +189,7 @@ async fn test_github_webhook_processing() {
 
     let signals = connector.handle_webhook(webhook_params).await.unwrap();
     assert_eq!(signals.len(), 1);
-    assert_eq!(signals[0].kind, "pr_created");
+    assert_eq!(signals[0].kind, "pr_opened");
     assert_eq!(signals[0].provider_slug, "github");
 
     // Test webhook without action field (should be ignored)

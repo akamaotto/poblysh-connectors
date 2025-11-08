@@ -16,3 +16,8 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+## Docker QA Guidance
+
+- When evaluating the dockerization effort (e.g., `add-dockerization-post-mvp`), follow the new guide in `README.md` under **Docker Build & Swagger UI Testing** before approving any change.
+- The guide covers `docker build`, running the container with `POBLYSH_*` environment variables, and manually exercising the Swagger UI (`/docs`) plus `/openapi.json`; refer back to it whenever manual QA is requested.

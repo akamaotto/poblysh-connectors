@@ -45,6 +45,10 @@ pub struct AppConfig {
     pub webhook_slack_signing_secret: Option<String>,
     #[serde(default = "default_webhook_slack_tolerance_seconds")]
     pub webhook_slack_tolerance_seconds: u64,
+    #[serde(default = "default_webhook_rate_limit_per_minute")]
+    pub webhook_rate_limit_per_minute: u32,
+    #[serde(default = "default_webhook_rate_limit_burst_size")]
+    pub webhook_rate_limit_burst_size: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jira_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -320,6 +324,8 @@ impl Default for AppConfig {
             gmail_client_id: None,
             gmail_client_secret: None,
             webhook_slack_tolerance_seconds: default_webhook_slack_tolerance_seconds(),
+            webhook_rate_limit_per_minute: default_webhook_rate_limit_per_minute(),
+            webhook_rate_limit_burst_size: default_webhook_rate_limit_burst_size(),
             scheduler: SchedulerConfig::default(),
             rate_limit_policy: RateLimitPolicyConfig::default(),
             token_refresh: TokenRefreshConfig::default(),
@@ -568,6 +574,13 @@ impl AppConfig {
         // Validate mail spam configuration
         self.mail_spam.validate()?;
 
+        // Validate webhook configuration
+        if self.webhook_slack_tolerance_seconds == 0 {
+            return Err(ConfigError::InvalidSlackTolerance {
+                value: self.webhook_slack_tolerance_seconds,
+            });
+        }
+
         Ok(())
     }
 }
@@ -602,6 +615,14 @@ fn default_db_acquire_timeout_ms() -> u64 {
 
 fn default_webhook_slack_tolerance_seconds() -> u64 {
     300 // 5 minutes
+}
+
+fn default_webhook_rate_limit_per_minute() -> u32 {
+    300 // Default rate limit per minute
+}
+
+fn default_webhook_rate_limit_burst_size() -> u32 {
+    50 // Default burst size
 }
 
 fn default_sync_scheduler_tick_interval_seconds() -> u64 {
@@ -747,6 +768,8 @@ pub enum ConfigError {
     InvalidMailSpamAllowlistEntry { entry: String },
     #[error("invalid mail spam denylist entry: {entry}")]
     InvalidMailSpamDenylistEntry { entry: String },
+    #[error("webhook Slack tolerance must be positive, got {value}")]
+    InvalidSlackTolerance { value: u64 },
 }
 
 /// Check if a string is a valid email or domain format
@@ -910,6 +933,16 @@ impl ConfigLoader {
             .remove("WEBHOOK_SLACK_TOLERANCE_SECONDS")
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_webhook_slack_tolerance_seconds);
+
+        let webhook_rate_limit_per_minute = layered
+            .remove("WEBHOOK_RATE_LIMIT_PER_MINUTE")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_webhook_rate_limit_per_minute);
+
+        let webhook_rate_limit_burst_size = layered
+            .remove("WEBHOOK_RATE_LIMIT_BURST_SIZE")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(default_webhook_rate_limit_burst_size);
 
         // Do not inject hardcoded Jira client credentials; require explicit configuration
 
@@ -1086,6 +1119,8 @@ impl ConfigLoader {
             github_api_base,
             webhook_slack_signing_secret,
             webhook_slack_tolerance_seconds,
+            webhook_rate_limit_per_minute,
+            webhook_rate_limit_burst_size,
             scheduler,
             rate_limit_policy,
             token_refresh,

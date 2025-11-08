@@ -9,26 +9,89 @@ use axum::{
     extract::{Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
 
 use crate::config::AppConfig;
+use crate::error::ApiError;
 
 type HmacSha256 = Hmac<Sha256>;
 
-// Simple in-memory fixed-window rate limiter per (provider, tenant_id)
+/// Validates an operator bearer token against configured tokens
+fn validate_operator_token(config: &AppConfig, token: &str) -> bool {
+    config
+        .operator_tokens
+        .iter()
+        .any(|configured| ConstantTimeEq::ct_eq(token.as_bytes(), configured.as_bytes()).into())
+}
+
+/// Extracts and validates operator bearer token from headers
+fn check_operator_auth(config: &AppConfig, headers: &HeaderMap) -> bool {
+    if let Some(auth_header) = headers.get("authorization").and_then(|h| h.to_str().ok()) {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            return validate_operator_token(config, token);
+        }
+    }
+    false
+}
+
+// Simple in-memory fixed-window rate limiter per (provider, tenant_id, ip)
 // Window unit: seconds epoch rounded to minute
-const WEBHOOK_RL_PER_MINUTE: u32 = 300; // default limit per provider/tenant per minute
 static WEBHOOK_RL: OnceLock<Mutex<HashMap<String, (u64, u32)>>> = OnceLock::new();
 
-fn is_rate_limited(provider: &str, tenant_id: &str) -> bool {
+// Extract client IP from headers (supports common proxy headers)
+fn extract_client_ip(headers: &HeaderMap) -> Option<String> {
+    // Try X-Forwarded-For first (most common)
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|h| h.to_str().ok()) {
+        // Take the first IP from the comma-separated list
+        return forwarded.split(',').next().map(|s| s.trim().to_string());
+    }
+
+    // Try X-Real-IP
+    if let Some(real_ip) = headers.get("x-real-ip").and_then(|h| h.to_str().ok()) {
+        return Some(real_ip.to_string());
+    }
+
+    // Try CF-Connecting-IP (Cloudflare)
+    if let Some(cf_ip) = headers
+        .get("cf-connecting-ip")
+        .and_then(|h| h.to_str().ok())
+    {
+        return Some(cf_ip.to_string());
+    }
+
+    None
+}
+
+fn is_rate_limited(
+    provider: &str,
+    tenant_id: &str,
+    headers: &HeaderMap,
+    config: &AppConfig,
+) -> bool {
     let map = WEBHOOK_RL.get_or_init(|| Mutex::new(HashMap::new()));
-    let key = format!("{}:{}", provider, tenant_id);
+
+    // Create rate limit key with IP component if available
+    let ip_component = extract_client_ip(headers)
+        .map(|ip| {
+            // Hash the IP to avoid storing raw IP addresses in memory
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            ip.hash(&mut hasher);
+            format!(":{}", hasher.finish())
+        })
+        .unwrap_or_default();
+
+    let key = format!("{}:{}{}", provider, tenant_id, ip_component);
+
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -40,7 +103,7 @@ fn is_rate_limited(provider: &str, tenant_id: &str) -> bool {
         // new window
         *entry = (window, 0);
     }
-    if entry.1 >= WEBHOOK_RL_PER_MINUTE {
+    if entry.1 >= config.webhook_rate_limit_per_minute {
         true
     } else {
         entry.1 += 1;
@@ -105,6 +168,7 @@ pub fn verify_github_signature(
     signature_header: &str,
     secret: &str,
 ) -> VerificationResult<()> {
+    let start_time = Instant::now();
     debug!(
         body_size = body.len(),
         "Starting GitHub signature verification"
@@ -141,8 +205,16 @@ pub fn verify_github_signature(
     // Compare signatures using constant-time comparison to prevent timing attacks
     let expected_bytes_array: &[u8] = expected_bytes.as_ref();
     if subtle::ConstantTimeEq::ct_eq(expected_bytes_array, &provided_bytes[..]).into() {
+        // Record success metrics
+        metrics::counter!("signature_verification_success", "provider" => "github").increment(1);
+        metrics::histogram!("signature_verification_latency_seconds", "provider" => "github")
+            .record(start_time.elapsed());
         Ok(())
     } else {
+        // Record failure metrics
+        metrics::counter!("signature_verification_failure", "provider" => "github", "outcome" => "invalid_signature").increment(1);
+        metrics::histogram!("signature_verification_latency_seconds", "provider" => "github")
+            .record(start_time.elapsed());
         Err(VerificationError::VerificationFailed)
     }
 }
@@ -155,6 +227,7 @@ pub fn verify_slack_signature(
     secret: &str,
     tolerance_seconds: u64,
 ) -> VerificationResult<()> {
+    let start_time = Instant::now();
     debug!(
         body_size = body.len(),
         tolerance_seconds, "Starting Slack signature verification"
@@ -191,6 +264,11 @@ pub fn verify_slack_signature(
     let time_diff = now.abs_diff(timestamp);
 
     if time_diff > tolerance_seconds {
+        // Record replay rejection metrics
+        metrics::counter!("signature_verification_replay_reject", "provider" => "slack", "outcome" => "timestamp_out_of_window").increment(1);
+        metrics::histogram!("signature_verification_latency_seconds", "provider" => "slack")
+            .record(start_time.elapsed());
+
         if now > timestamp {
             return Err(VerificationError::TimestampTooOld {
                 seconds: time_diff,
@@ -232,8 +310,16 @@ pub fn verify_slack_signature(
     // Compare signatures using constant-time comparison to prevent timing attacks
     let expected_bytes_array: &[u8] = expected_bytes.as_ref();
     if subtle::ConstantTimeEq::ct_eq(expected_bytes_array, &provided_bytes[..]).into() {
+        // Record success metrics
+        metrics::counter!("signature_verification_success", "provider" => "slack").increment(1);
+        metrics::histogram!("signature_verification_latency_seconds", "provider" => "slack")
+            .record(start_time.elapsed());
         Ok(())
     } else {
+        // Record failure metrics
+        metrics::counter!("signature_verification_failure", "provider" => "slack", "outcome" => "invalid_signature").increment(1);
+        metrics::histogram!("signature_verification_latency_seconds", "provider" => "slack")
+            .record(start_time.elapsed());
         Err(VerificationError::VerificationFailed)
     }
 }
@@ -347,13 +433,13 @@ pub async fn webhook_verification_middleware(
     State(config): State<std::sync::Arc<AppConfig>>,
     request: Request,
     next: Next,
-) -> Result<Response, StatusCode> {
+) -> Response {
     // Extract path first to avoid borrowing issues
     let path = request.uri().path().to_string();
 
     // Only apply to public webhook routes with tenant_id
     if !path.starts_with("/webhooks/") || path.split('/').count() != 4 {
-        return Ok(next.run(request).await);
+        return next.run(request).await;
     }
 
     // Extract provider and tenant_id from path
@@ -361,49 +447,90 @@ pub async fn webhook_verification_middleware(
     let provider = path_parts[2];
     let tenant_id = path_parts[3];
 
+    // Check for operator auth first (precedence rule)
+    let headers = request.headers();
+    if check_operator_auth(&config, headers) {
+        debug!(
+            provider = %provider,
+            tenant_id = %tenant_id,
+            "Operator auth present, bypassing signature verification"
+        );
+        return next.run(request).await;
+    }
+
     // Check if verification is configured for this provider
+    // Note: Unsupported providers should proceed to verification to get proper 404 responses
     let verification_enabled = match provider {
         "github" => config.webhook_github_secret.is_some(),
         "slack" => config.webhook_slack_signing_secret.is_some(),
         "jira" => config.webhook_jira_secret.is_some(),
         "zoho-cliq" => config.webhook_zoho_cliq_token.is_some(),
-        _ => false,
+        _ => true, // Allow unsupported providers to proceed to verification for proper 404
     };
 
-    // For Jira, allow pass-through in local/test when secret not configured
+    // For Jira, only allow pass-through in local/test when secret not configured
     if provider == "jira" && !verification_enabled {
         if matches!(config.profile.as_str(), "local" | "test") {
-            // Allow in dev/test without verification
-            return Ok(next.run(request).await);
+            debug!(
+                provider = %provider,
+                "Jira webhook secret not configured in test profile; allowing without verification"
+            );
+            return next.run(request).await;
         } else {
+            // In non-test profiles, require verification like other providers
             warn!(
                 provider = %provider,
-                "Jira webhook secret not configured; skipping verification"
+                "Jira webhook verification not configured for non-test profile"
             );
-            return Ok(next.run(request).await);
+            let api_error = ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Webhook verification not configured for provider",
+            );
+            return api_error.into_response();
         }
     }
 
+    // Only require verification for supported providers that have it configured
+    // Unsupported providers will be handled by verify_webhook_signature which returns 404
     if !verification_enabled {
         warn!(
             provider = %provider,
             "Webhook verification not configured for provider"
         );
-        return Err(StatusCode::UNAUTHORIZED);
+        let api_error = ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "UNAUTHORIZED",
+            "Webhook verification not configured for provider",
+        );
+        return api_error.into_response();
     }
 
     // Basic per-tenant/provider rate limiting (fixed window per minute)
-    if is_rate_limited(provider, tenant_id) {
+    if is_rate_limited(provider, tenant_id, headers, &config) {
         warn!(provider = %provider, tenant_id = %tenant_id, "Webhook rate limit exceeded");
-        return Err(StatusCode::TOO_MANY_REQUESTS);
+        let api_error = ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMIT_EXCEEDED",
+            "Webhook rate limit exceeded",
+        );
+        return api_error.into_response();
     }
 
     // Get the request body bytes for signature verification
     let (parts, body) = request.into_parts();
-    let body_bytes = axum::body::to_bytes(body, usize::MAX).await.map_err(|e| {
-        error!(error = ?e, "Failed to read request body for webhook verification");
-        StatusCode::BAD_REQUEST
-    })?;
+    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            error!(error = ?e, "Failed to read request body for webhook verification");
+            let api_error = ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "INVALID_BODY",
+                "Failed to read request body",
+            );
+            return api_error.into_response();
+        }
+    };
 
     // Verify the signature
     match verify_webhook_signature(provider, &body_bytes, &parts.headers, &config) {
@@ -416,7 +543,7 @@ pub async fn webhook_verification_middleware(
 
             // Reconstruct the request with the body
             let request = Request::from_parts(parts, axum::body::Body::from(body_bytes));
-            Ok(next.run(request).await)
+            next.run(request).await
         }
         Err(e) => {
             let error_msg = match &e {
@@ -467,7 +594,9 @@ pub async fn webhook_verification_middleware(
                 "Webhook signature verification failed"
             );
 
-            Err(e.status_code())
+            // Convert VerificationError to ApiError for proper problem+json response
+            let api_error: ApiError = e.into();
+            api_error.into_response()
         }
     }
 }

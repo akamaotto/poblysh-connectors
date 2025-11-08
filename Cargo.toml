@@ -58,13 +58,16 @@ jsonwebtoken = "9.3.0"
 lru = "0.16.2"
 
 [dev-dependencies]
-reqwest = { version = "0.12.9", features = ["json"] }
+reqwest = { version = "0.12.9", features = ["json", "blocking"] }
 wiremock = "0.6.2"
 base64 = "0.22"
 tempfile = "3.14.0"
 testcontainers = "0.25.2"
 testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 anyhow = "1.0.95"
+walkdir = "2.5.0"
+assert_cmd = "2.0.16"
+portpicker = "0.1.1"
 
 [patch.crates-io]
 sqlx-mysql = { path = "patches/sqlx-mysql" }

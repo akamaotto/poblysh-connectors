@@ -1,0 +1,14 @@
+{
+  "provider": "jira",
+  "name": "issue_created_basic",
+  "input": {
+    "webhookEvent": "jira:issue_created",
+    "issue": {
+      "id": "1001",
+      "key": "PROJ-1"
+    }
+  },
+  "expected": {
+    "kind": "issue_created"
+  }
+}

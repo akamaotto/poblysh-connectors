@@ -14,6 +14,7 @@ use crate::connectors::{
     trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::{SignalKind, normalize_example_payload};
 
 /// Example stub connector
 ///
@@ -161,7 +162,7 @@ impl Connector for ExampleConnector {
                 tenant_id: Uuid::new_v4(),
                 provider_slug: "example".to_string(),
                 connection_id: Uuid::new_v4(),
-                kind: "example_event".to_string(),
+                kind: SignalKind::IssueCreated.as_str().to_string(),
                 occurred_at: now,
                 received_at: now,
                 payload: serde_json::json!({
@@ -183,22 +184,24 @@ impl Connector for ExampleConnector {
     ) -> Result<Vec<Signal>, Box<dyn std::error::Error + Send + Sync>> {
         // Stub implementation - return mock signals from webhook
         let now = DateTime::from(Utc::now());
-        let event_type = params
-            .payload
-            .get("event_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let signal_kind = match normalize_example_payload(&params.payload) {
+            Ok(kind) => kind,
+            Err(err) => {
+                tracing::debug!(?err, "Unsupported example webhook payload");
+                return Ok(vec![]);
+            }
+        };
 
         Ok(vec![Signal {
             id: Uuid::new_v4(),
             tenant_id: params.tenant_id,
             provider_slug: "example".to_string(),
             connection_id: Uuid::new_v4(),
-            kind: format!("webhook:{}", event_type),
+            kind: signal_kind.as_str().to_string(),
             occurred_at: now,
             received_at: now,
             payload: params.payload,
-            dedupe_key: Some(format!("webhook_{}", now.timestamp())),
+            dedupe_key: Some(format!("{}_{}", signal_kind.as_str(), now.timestamp())),
             created_at: now,
             updated_at: now,
         }])

@@ -179,3 +179,109 @@ The OpenAPI document SHALL describe `GET /healthz` and `GET /readyz` endpoints a
 - THEN the document contains entries for `/healthz` and `/readyz` with `GET` operations
 - AND the operations do not list bearer auth requirements
 
+### Requirement: Cursor-Based Pagination
+All list endpoints SHALL use a consistent cursor-based pagination contract for stable, forward-only navigation through result sets.
+
+Request Parameters:
+- `limit` (integer, optional): Maximum number of items to return; default 50, maximum 100
+- `cursor` (string, optional): Opaque token representing the position to resume from; not provided for the first page
+
+Response Shape:
+- `data` (array): The list of items for the current page
+- `next_cursor` (string, nullable): Opaque token for the next page; `null` when no additional pages exist
+- `has_more` (boolean, optional): Convenience field indicating if more pages exist; true when `next_cursor` is not null
+
+Cursor Implementation:
+- Tokens are opaque Base64-encoded JSON objects containing the sort keys of the last item
+- Content includes the primary ordering field(s) plus a unique tiebreaker (typically the primary key `id`)
+- Example for event-like data: `eyJjcmVhdGVkX2F0IjoiMjAyNC0xMS0wMVQxMjowMDowMFoiLCJpZCI6IjExMTExMTExLTExMTEtMTExMS0xMTExLTExMTExMTExMTExMSJ9`
+- Tokens are validated server-side; clients MUST treat them as opaque
+
+Stable Ordering Requirement:
+- Every list endpoint MUST specify a deterministic ordering with a unique tiebreaker
+- Event-like streams (append-only): `created_at DESC, id DESC` for reverse chronological views
+- Catalog-like lists: endpoint-specific ordering (e.g., `name ASC, id ASC`)
+- The tiebreaker MUST be unique to prevent duplicates/skips when values are tied
+
+#### Scenario: First page request
+- GIVEN a client requests a list without a cursor
+- WHEN the server processes the request
+- THEN the response includes up to `limit` items
+- AND `next_cursor` is provided if more items exist, or `null` if this is the last page
+
+#### Scenario: Next page request
+- GIVEN a client provides a `cursor` from a previous response
+- WHEN the server processes the request
+- THEN the response starts after the position indicated by the cursor
+- AND includes up to `limit` items with deterministic ordering
+- AND `next_cursor` reflects the new position or `null` if complete
+
+#### Scenario: Cursor round-trip stability
+- GIVEN a client receives a cursor and immediately uses it
+- WHEN the underlying data hasn't changed
+- THEN the next page MUST start exactly where the previous page ended
+- AND no items are duplicated or skipped across page boundaries
+
+#### Scenario: Stable ordering under ties
+- GIVEN multiple items have identical primary sort values
+- WHEN paginating through the result set
+- THEN the secondary tiebreaker MUST ensure consistent ordering
+- AND page boundaries MUST be deterministic across requests
+
+### Requirement: Cursor Pagination Primitives
+The API MUST implement cursor-based pagination consistently across all list endpoints.
+
+- Request parameters:
+  - `limit` (integer): default 50, max 100, min 1; must be a positive integer (no decimals, no negatives). Server applies bounds and validates type.
+  - `cursor` (string, optional): opaque token representing the last seen item position.
+- Response metadata:
+  - `next_cursor` (string | null): always present; `null` when there are no further pages.
+  - The `items` array name MAY vary per endpoint (e.g., `jobs`, `connections`), but the `next_cursor` property name is uniform.
+
+#### Scenario: First page with next_cursor
+- GIVEN more than `limit` matches exist
+- WHEN requesting a list with `?limit=2`
+- THEN the response contains 2 items and a non-empty `next_cursor`
+
+#### Scenario: Last page sets next_cursor to null
+- GIVEN a final page of results
+- WHEN the client fetches the last page
+- THEN the response contains items (possibly zero) and `next_cursor: null`
+
+#### Scenario: Limit bounds enforced
+- WHEN `limit` < 1 or > 100 or is not a positive integer (e.g., decimal, negative, non-numeric)
+- THEN respond `400` with `code: "VALIDATION_FAILED"`
+
+### Requirement: Stable Ordering
+All list endpoints MUST define a deterministic total order and use a unique tiebreaker to avoid duplicates or gaps during pagination.
+
+- Event-like lists (e.g., activity, jobs): `created_at DESC, id DESC` or endpoint-specific timestamp `DESC` with `id DESC` tiebreaker.
+- Catalog-like lists (e.g., providers): `name ASC, id ASC` or endpoint-specific field `ASC` with `id ASC` tiebreaker.
+- The cursor MUST encode only the ordered keys needed to resume scanning.
+
+#### Scenario: Ties broken by id
+- GIVEN multiple items share the same primary sort value
+- WHEN fetching a page boundary at the tie
+- THEN subsequent pages continue with consistent `id` tiebreaker ordering with no duplicates
+
+### Requirement: Cursor Token Opaqueness
+Cursor tokens SHALL be opaque to clients. Servers encode minimal ordered keys as standard Base64-encoded JSON with padding.
+
+- The server MUST validate cursor structure and integrity, and MUST reject malformed or unrecognized tokens with a 400 error.
+- The server MAY reject previously-issued cursors that are no longer valid due to data changes, retention policies, or other operational constraints, using the same `VALIDATION_FAILED` semantics.
+- Cursors are valid only for the same filter set used to produce them.
+
+#### Scenario: Malformed cursor rejected
+- WHEN the `cursor` cannot be decoded or validated
+- THEN respond `400` with `code: "VALIDATION_FAILED"`
+
+#### Scenario: Cursor security validation
+- WHEN the cursor fails security validation (too long, invalid characters, invalid UTF-8, invalid JSON, out-of-bounds timestamps, nil UUID)
+- THEN respond `400` with `code: "VALIDATION_FAILED"`
+- Validation MUST enforce reasonable bounds (for example: max 1000 characters, decoded max 500 bytes, timestamp within ±1 year, non-nil UUID)
+
+#### Scenario: Cursor rejected with different filters
+- WHEN a cursor produced with one filter set is used with a different filter set
+- THEN the server MAY reject the cursor with `400` and `code: "VALIDATION_FAILED"`
+- Clients MUST treat cursors as bound to the exact filter set used to produce them
+

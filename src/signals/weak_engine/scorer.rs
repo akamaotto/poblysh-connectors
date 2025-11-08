@@ -9,6 +9,12 @@ use crate::models::{ScoringWeights, SignalScores};
 /// Signal scorer that applies the six-dimensional scoring model
 pub struct SignalScorer {}
 
+impl Default for SignalScorer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SignalScorer {
     /// Create a new signal scorer
     pub fn new() -> Self {
@@ -283,14 +289,14 @@ impl SignalScorer {
         }
 
         // Source credibility if available in payload
-        if let Some(user) = signal.payload.get("user") {
-            if let Some(authority) = user.get("authority").and_then(|v| v.as_str()) {
-                match authority {
-                    "admin" | "owner" => score += 0.2,
-                    "maintainer" | "lead" => score += 0.15,
-                    "member" | "contributor" => score += 0.1,
-                    _ => {}
-                }
+        if let Some(user) = signal.payload.get("user")
+            && let Some(authority) = user.get("authority").and_then(|v| v.as_str())
+        {
+            match authority {
+                "admin" | "owner" => score += 0.2,
+                "maintainer" | "lead" => score += 0.15,
+                "member" | "contributor" => score += 0.1,
+                _ => {}
             }
         }
 
@@ -327,7 +333,7 @@ impl TFIDFVectorizer {
         let mut vector = vec![0.0; 768]; // Standard BERT embedding size
 
         // Create a simple hash-based embedding
-        for (_i, word) in words.iter().take(100).enumerate() {
+        for word in words.iter().take(100) {
             let hash = hash_string(word) % 768;
             vector[hash] += 1.0 / (words.len() as f32).sqrt();
         }
@@ -374,6 +380,7 @@ mod tests {
     use super::*;
     use crate::config::AppConfig;
     use crate::db::init_pool;
+    use crate::models::connection::ActiveModel as ConnectionActiveModel;
     use crate::models::signal::ActiveModel as SignalActiveModel;
     use crate::models::tenant::ActiveModel as TenantActiveModel;
     use chrono::Utc;
@@ -395,6 +402,19 @@ mod tests {
         };
         tenant.insert(&db).await.unwrap();
 
+        let connection_id = Uuid::new_v4();
+        let connection = ConnectionActiveModel {
+            id: sea_orm::Set(connection_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            provider_slug: sea_orm::Set("github".to_string()),
+            external_id: sea_orm::Set("test-connection".to_string()),
+            status: sea_orm::Set("active".to_string()),
+            created_at: sea_orm::Set(Utc::now().into()),
+            updated_at: sea_orm::Set(Utc::now().into()),
+            ..Default::default()
+        };
+        connection.insert(&db).await.unwrap();
+
         let signal_payload = serde_json::json!({
             "title": "Critical security vulnerability discovered",
             "description": "A severe security issue was found in the authentication system",
@@ -407,6 +427,7 @@ mod tests {
             id: sea_orm::Set(Uuid::new_v4()),
             tenant_id: sea_orm::Set(tenant_id),
             provider_slug: sea_orm::Set("github".to_string()),
+            connection_id: sea_orm::Set(connection_id),
             kind: sea_orm::Set("security_alert".to_string()),
             occurred_at: sea_orm::Set(Utc::now().into()),
             received_at: sea_orm::Set(Utc::now().into()),

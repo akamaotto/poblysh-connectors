@@ -1,0 +1,14 @@
+{
+  "provider": "jira",
+  "name": "issue_updated_status_change",
+  "input": {
+    "webhookEvent": "jira:issue_updated",
+    "issue": {
+      "id": "1002",
+      "key": "PROJ-2"
+    }
+  },
+  "expected": {
+    "kind": "issue_updated"
+  }
+}

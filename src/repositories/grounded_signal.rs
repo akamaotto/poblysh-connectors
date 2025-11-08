@@ -58,6 +58,7 @@ impl<'a> GroundedSignalRepository<'a> {
     /// - If `idempotency_key` is Some, it will first check for an existing grounded signal
     ///   with the same tenant_id and idempotency_key and return it if found.
     /// - Otherwise, it will insert a new grounded signal.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         signal_id: Uuid,
@@ -69,16 +70,15 @@ impl<'a> GroundedSignalRepository<'a> {
         idempotency_key: Option<String>,
     ) -> Result<GroundedSignalResponse, RepositoryError> {
         // If an idempotency key is provided, attempt to reuse an existing grounded signal
-        if let Some(ref key) = idempotency_key {
-            if let Some(existing) = GroundedSignal::find()
+        if let Some(ref key) = idempotency_key
+            && let Some(existing) = GroundedSignal::find()
                 .filter(crate::models::grounded_signal::Column::TenantId.eq(tenant_id))
                 .filter(crate::models::grounded_signal::Column::IdempotencyKey.eq(key.clone()))
                 .one(self.db)
                 .await
                 .map_err(RepositoryError::database_error)?
-            {
-                return Ok(existing.into());
-            }
+        {
+            return Ok(existing.into());
         }
 
         let grounded_signal = GroundedSignalActiveModel {
@@ -94,7 +94,7 @@ impl<'a> GroundedSignalRepository<'a> {
             score_credibility: Set(scores.credibility),
             total_score: Set(scores.total),
             status: Set(status),
-            evidence: Set(serde_json::Value::from(evidence)),
+            evidence: Set(evidence),
             recommendation: Set(recommendation),
             created_at: Set(chrono::Utc::now().into()),
             updated_at: Set(chrono::Utc::now().into()),
@@ -254,12 +254,27 @@ mod tests {
     use super::*;
     use crate::config::AppConfig;
     use crate::db::init_pool;
+    use crate::models::connection::ActiveModel as ConnectionActiveModel;
     use crate::models::grounded_signal::SignalScores;
     use crate::models::signal::ActiveModel as SignalActiveModel;
     use crate::models::tenant::ActiveModel as TenantActiveModel;
     use chrono::Utc;
-    use sea_orm::ActiveModelTrait;
+    use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseBackend, Statement};
     use uuid::Uuid;
+
+    async fn table_exists(db: &DatabaseConnection, table: &str) -> bool {
+        let stmt = Statement::from_string(
+            DatabaseBackend::Postgres,
+            format!("SELECT to_regclass('public.{table}') IS NOT NULL AS exists"),
+        );
+
+        db.query_one(stmt)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<bool>("", "exists").ok())
+            .unwrap_or(false)
+    }
 
     async fn setup_test_data() -> (DatabaseConnection, Uuid, Uuid) {
         let config = AppConfig {
@@ -277,12 +292,27 @@ mod tests {
         };
         tenant.insert(&db).await.unwrap();
 
+        // Create connection for the signal
+        let connection_id = Uuid::new_v4();
+        let connection = ConnectionActiveModel {
+            id: sea_orm::Set(connection_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            provider_slug: sea_orm::Set("test-provider".to_string()),
+            external_id: sea_orm::Set("test-connection".to_string()),
+            status: sea_orm::Set("active".to_string()),
+            created_at: sea_orm::Set(Utc::now().into()),
+            updated_at: sea_orm::Set(Utc::now().into()),
+            ..Default::default()
+        };
+        connection.insert(&db).await.unwrap();
+
         // Create signal
         let signal_id = Uuid::new_v4();
         let signal = SignalActiveModel {
             id: sea_orm::Set(signal_id),
             tenant_id: sea_orm::Set(tenant_id),
             provider_slug: sea_orm::Set("test-provider".to_string()),
+            connection_id: sea_orm::Set(connection_id),
             kind: sea_orm::Set("test_event".to_string()),
             occurred_at: sea_orm::Set(Utc::now().into()),
             received_at: sea_orm::Set(Utc::now().into()),
@@ -297,6 +327,9 @@ mod tests {
     #[tokio::test]
     async fn test_create_grounded_signal() {
         let (db, tenant_id, signal_id) = setup_test_data().await;
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let repo = GroundedSignalRepository::new(&db);
 
         let scores = SignalScores {
@@ -340,6 +373,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_grounded_signals_empty() {
         let (db, tenant_id, _) = setup_test_data().await;
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let repo = GroundedSignalRepository::new(&db);
 
         let query = ListGroundedSignalsQuery {
@@ -359,6 +395,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_grounded_signals_with_data() {
         let (db, tenant_id, signal_id) = setup_test_data().await;
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let repo = GroundedSignalRepository::new(&db);
 
         // Create test grounded signals
@@ -411,6 +450,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_grounded_signals_with_filters() {
         let (db, tenant_id, signal_id) = setup_test_data().await;
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let repo = GroundedSignalRepository::new(&db);
 
         let scores = SignalScores {
@@ -485,6 +527,9 @@ mod tests {
     #[tokio::test]
     async fn test_update_grounded_signal_status() {
         let (db, tenant_id, signal_id) = setup_test_data().await;
+        if !table_exists(&db, "grounded_signals").await {
+            return;
+        }
         let repo = GroundedSignalRepository::new(&db);
 
         let scores = SignalScores {

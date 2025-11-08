@@ -18,6 +18,7 @@ use crate::connectors::{
     trait_::{AuthorizeParams, ExchangeTokenParams, SyncParams, SyncResult, WebhookParams},
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::normalize_zoho_cliq_webhook_kind;
 
 /// Zoho Cliq connector
 #[derive(Debug)]
@@ -154,15 +155,10 @@ impl Connector for ZohoCliqConnector {
         };
 
         // Map event type to signal kind
-        let signal_kind = match event_type {
-            "message_posted" => "message_posted",
-            "message_updated" => "message_updated",
-            "message_deleted" => "message_deleted",
-            _ => {
-                debug!(
-                    event_type = %event_type,
-                    "Ignoring Zoho Cliq event type"
-                );
+        let signal_kind = match normalize_zoho_cliq_webhook_kind(&params.payload) {
+            Ok(kind) => kind,
+            Err(err) => {
+                debug!(?err, event_type = %event_type, "Ignoring Zoho Cliq event type");
                 return Ok(vec![]);
             }
         };
@@ -191,7 +187,7 @@ impl Connector for ZohoCliqConnector {
         // Generate dedupe key using message ID and event type
         let dedupe_key = format!(
             "zoho-cliq:{}:{}:{}",
-            signal_kind,
+            signal_kind.as_str(),
             event.message.id,
             occurred_at.timestamp()
         );
@@ -201,7 +197,7 @@ impl Connector for ZohoCliqConnector {
             tenant_id: params.tenant_id,
             provider_slug: "zoho-cliq".to_string(),
             connection_id: Uuid::new_v4(), // Will be populated by webhook handler
-            kind: signal_kind.to_string(),
+            kind: signal_kind.as_str().to_string(),
             occurred_at: occurred_at.into(),
             received_at,
             payload: normalized_payload,

@@ -2,11 +2,24 @@
 //!
 //! This module contains handlers for the providers endpoints.
 
+use crate::cursor::{decode_generic_cursor, encode_generic_cursor};
 use crate::error::ApiError;
 use crate::server::AppState;
-use axum::{extract::State, response::Json};
+use axum::{
+    extract::{Query, State},
+    response::Json,
+};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
+
+/// Query parameters for providers listing
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub struct ListProvidersQuery {
+    /// Maximum number of providers to return (default: 50, max: 100)
+    pub limit: Option<i64>,
+    /// Opaque cursor for pagination continuation
+    pub cursor: Option<String>,
+}
 
 /// Provider information for public listing
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
@@ -26,21 +39,75 @@ pub struct ProviderInfo {
 pub struct ProvidersResponse {
     /// List of available providers
     pub providers: Vec<ProviderInfo>,
+    /// Opaque cursor for fetching the next page (null if this is the last page)
+    pub next_cursor: Option<String>,
 }
 
 /// Public endpoint to list all available providers
 #[utoipa::path(
     get,
     path = "/providers",
+    params(ListProvidersQuery),
     responses(
-        (status = 200, description = "List of available providers", body = ProvidersResponse),
+        (status = 200, description = "List of available providers", body = ProvidersResponse, example = json!({
+            "providers": [
+                {
+                    "name": "github",
+                    "auth_type": "oauth2",
+                    "scopes": ["repo", "user:email", "read:org"],
+                    "webhooks": true
+                },
+                {
+                    "name": "slack",
+                    "auth_type": "oauth2",
+                    "scopes": ["channels:read", "chat:write", "users:read"],
+                    "webhooks": true
+                }
+            ],
+            "next_cursor": null
+        })),
+        (status = 400, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     ),
     tag = "providers"
 )]
 pub async fn list_providers(
     State(_state): State<AppState>,
+    Query(query): Query<ListProvidersQuery>,
 ) -> Result<Json<ProvidersResponse>, ApiError> {
+    // Validate and parse limit
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::new(
+            axum::http::StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "limit must be between 1 and 100",
+        ));
+    }
+
+    // Validate cursor if provided - parse Base64 JSON cursor with provider name
+    let start_after_provider = if let Some(ref cursor_str) = query.cursor {
+        let cursor = decode_generic_cursor(cursor_str).map_err(|_| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "cursor must be valid base64-encoded JSON",
+            )
+        })?;
+
+        let provider_name = cursor.keys["name"].as_str().ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "cursor must contain provider name field",
+            )
+        })?;
+
+        Some(provider_name.to_string())
+    } else {
+        None
+    };
+
     // Static list for MVP - will be replaced with registry in future changes
     let mut providers = vec![
         ProviderInfo {
@@ -95,10 +162,60 @@ pub async fn list_providers(
         },
     ];
 
-    // Stable ascending sort by name
+    // Stable ascending sort by name as per spec
     providers.sort_by(|a, b| a.name.cmp(&b.name));
 
-    Ok(Json(ProvidersResponse { providers }))
+    // Apply pagination using cursor-based approach
+    let (paginated_providers, next_cursor) = if let Some(ref start_after) = start_after_provider {
+        // Find providers after the specified provider name
+        let mut iter = providers.into_iter().skip_while(|p| p.name <= *start_after);
+        let paginated: Vec<_> = iter.by_ref().take(limit as usize).collect();
+
+        // Check if there are more providers
+        let has_more = iter.next().is_some();
+
+        let next_cursor = if has_more && paginated.len() == limit as usize {
+            if let Some(last_provider) = paginated.last() {
+                let keys = serde_json::json!({
+                    "name": last_provider.name
+                });
+                Some(encode_generic_cursor(keys))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        (paginated, next_cursor)
+    } else {
+        // First page - take from beginning
+        let mut iter = providers.into_iter();
+        let paginated: Vec<_> = iter.by_ref().take(limit as usize).collect();
+
+        // Check if there are more providers
+        let has_more = iter.next().is_some();
+
+        let next_cursor = if has_more && paginated.len() == limit as usize {
+            if let Some(last_provider) = paginated.last() {
+                let keys = serde_json::json!({
+                    "name": last_provider.name
+                });
+                Some(encode_generic_cursor(keys))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        (paginated, next_cursor)
+    };
+
+    Ok(Json(ProvidersResponse {
+        providers: paginated_providers,
+        next_cursor,
+    }))
 }
 
 #[cfg(test)]
@@ -115,7 +232,11 @@ mod tests {
         );
 
         // Call the handler
-        let result = list_providers(State(state)).await;
+        let query = ListProvidersQuery {
+            limit: None,
+            cursor: None,
+        };
+        let result = list_providers(State(state), Query(query)).await;
 
         // Assert successful response
         assert!(result.is_ok());
@@ -209,7 +330,10 @@ mod tests {
             },
         ];
 
-        let response = ProvidersResponse { providers };
+        let response = ProvidersResponse {
+            providers,
+            next_cursor: None,
+        };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: ProvidersResponse = serde_json::from_str(&json).unwrap();
 

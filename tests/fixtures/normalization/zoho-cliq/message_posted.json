@@ -1,0 +1,27 @@
+{
+  "provider": "zoho-cliq",
+  "name": "message_posted_channel",
+  "input": {
+    "event_type": "message_posted",
+    "message": {
+      "id": "abc123",
+      "message_type": "text",
+      "posted_time": "2025-01-01T10:00:00Z",
+      "text": "Hello!"
+    },
+    "user": {
+      "id": "user-1",
+      "first_name": "Test",
+      "last_name": "User"
+    },
+    "chat": {
+      "id": "channel-1",
+      "name": "general",
+      "chat_type": "channel"
+    },
+    "time_stamp": "2025-01-01T10:00:00Z"
+  },
+  "expected": {
+    "kind": "message_posted"
+  }
+}

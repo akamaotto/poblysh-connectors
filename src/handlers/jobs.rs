@@ -3,6 +3,7 @@
 //! This module contains handlers for listing and managing sync jobs.
 
 use crate::auth::{OperatorAuth, TenantExtension};
+use crate::cursor::{decode_generic_cursor, encode_generic_cursor};
 use crate::error::{ApiError, validation_error};
 use crate::models::sync_job;
 use crate::repositories::SyncJobRepository;
@@ -139,7 +140,24 @@ impl From<sync_job::Model> for JobInfo {
         ("finished_after" = Option<String>, Query, description = "Filter jobs that finished after this ISO 8601 timestamp")
     ),
     responses(
-        (status = 200, description = "List of jobs for the tenant", body = JobsResponse),
+        (status = 200, description = "List of jobs for the tenant", body = JobsResponse, example = json!({
+            "jobs": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "provider_slug": "github",
+                    "connection_id": "550e8400-e29b-41d4-a716-446655440001",
+                    "job_type": "webhook",
+                    "status": "succeeded",
+                    "priority": 50,
+                    "attempts": 1,
+                    "scheduled_at": "2024-01-15T10:30:00Z",
+                    "retry_after": null,
+                    "started_at": "2024-01-15T10:30:01Z",
+                    "finished_at": "2024-01-15T10:32:30Z"
+                }
+            ],
+            "next_cursor": null
+        })),
         (status = 400, description = "Invalid query parameters", body = ApiError),
         (status = 401, description = "Missing or invalid bearer token", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
@@ -175,9 +193,8 @@ pub async fn list_jobs(
     };
 
     // Extract and parse cursor if provided
-    // Parse cursor if provided
     let cursor = if let Some(cursor_str) = &params.cursor {
-        Some(parse_cursor(cursor_str)?)
+        Some(parse_job_cursor(cursor_str)?)
     } else {
         None
     };
@@ -294,7 +311,7 @@ pub async fn list_jobs(
 
     // Encode next cursor if there are more results
     let next_cursor = if let Some((scheduled_at, id)) = result.next_cursor {
-        Some(encode_cursor(scheduled_at, id))
+        Some(encode_job_cursor(scheduled_at, id))
     } else {
         None
     };
@@ -307,52 +324,64 @@ pub async fn list_jobs(
     Ok(Json(response))
 }
 
-/// Cursor structure for pagination
-#[derive(Debug, Serialize, Deserialize)]
-struct CursorData {
-    scheduled_at: DateTimeWithTimeZone,
-    id: Uuid,
+/// Encode job cursor data to standardized base64 string
+fn encode_job_cursor(scheduled_at: DateTimeWithTimeZone, id: Uuid) -> String {
+    let keys = serde_json::json!({
+        "scheduled_at": scheduled_at.to_rfc3339(),
+        "id": id.to_string()
+    });
+    encode_generic_cursor(keys)
 }
 
-/// Encode cursor data to base64 string
-fn encode_cursor(scheduled_at: DateTimeWithTimeZone, id: Uuid) -> String {
-    let cursor_data = CursorData { scheduled_at, id };
-    let json = serde_json::to_string(&cursor_data).expect("Failed to serialize cursor");
-    use base64::{Engine as _, engine::general_purpose};
-    general_purpose::STANDARD.encode(json)
-}
-
-/// Decode cursor from base64 string
-fn parse_cursor(cursor_str: &str) -> Result<(DateTimeWithTimeZone, Uuid), ApiError> {
-    use base64::{Engine as _, engine::general_purpose};
-    let decoded = general_purpose::STANDARD.decode(cursor_str).map_err(|_| {
+/// Decode job cursor from standardized base64 string
+fn parse_job_cursor(cursor_str: &str) -> Result<(DateTimeWithTimeZone, Uuid), ApiError> {
+    let cursor = decode_generic_cursor(cursor_str).map_err(|_| {
         validation_error(
             "Invalid cursor format",
             serde_json::json!({
-                "cursor": "Cursor must be valid base64"
+                "cursor": "Cursor must be valid base64-encoded JSON"
             }),
         )
     })?;
 
-    let json = String::from_utf8(decoded).map_err(|_| {
+    // Extract required fields from cursor
+    let scheduled_at_str = cursor.keys["scheduled_at"].as_str().ok_or_else(|| {
         validation_error(
             "Invalid cursor format",
             serde_json::json!({
-                "cursor": "Cursor must be valid UTF-8"
+                "cursor": "Cursor must contain scheduled_at field"
             }),
         )
     })?;
 
-    let cursor_data: CursorData = serde_json::from_str(&json).map_err(|_| {
+    let id_str = cursor.keys["id"].as_str().ok_or_else(|| {
         validation_error(
             "Invalid cursor format",
             serde_json::json!({
-                "cursor": "Cursor must contain valid JSON with scheduled_at and id"
+                "cursor": "Cursor must contain id field"
             }),
         )
     })?;
 
-    Ok((cursor_data.scheduled_at, cursor_data.id))
+    let scheduled_at = DateTime::parse_from_rfc3339(scheduled_at_str).map_err(|_| {
+        validation_error(
+            "Invalid cursor format",
+            serde_json::json!({
+                "cursor": "scheduled_at must be a valid RFC3339 timestamp"
+            }),
+        )
+    })?;
+
+    let id = Uuid::parse_str(id_str).map_err(|_| {
+        validation_error(
+            "Invalid cursor format",
+            serde_json::json!({
+                "cursor": "id must be a valid UUID"
+            }),
+        )
+    })?;
+
+    Ok((scheduled_at, id))
 }
 
 #[cfg(test)]
@@ -489,51 +518,51 @@ mod tests {
     }
 
     #[test]
-    fn test_cursor_encoding_roundtrip() {
+    fn test_job_cursor_encoding_roundtrip() {
         use chrono::TimeZone;
         let scheduled_at = Utc.timestamp_opt(1609459200, 0).unwrap().fixed_offset();
         let id = Uuid::new_v4();
 
-        let encoded = encode_cursor(scheduled_at, id);
-        let (decoded_scheduled_at, decoded_id) = parse_cursor(&encoded).unwrap();
+        let encoded = encode_job_cursor(scheduled_at, id);
+        let (decoded_scheduled_at, decoded_id) = parse_job_cursor(&encoded).unwrap();
 
         assert_eq!(scheduled_at, decoded_scheduled_at);
         assert_eq!(id, decoded_id);
     }
 
     #[test]
-    fn test_parse_invalid_cursor() {
-        let result = parse_cursor("invalid_base64!");
+    fn test_parse_invalid_job_cursor() {
+        let result = parse_job_cursor("invalid_base64!");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code.to_string(), "VALIDATION_FAILED");
     }
 
     #[test]
-    fn test_parse_non_utf8_cursor() {
+    fn test_parse_non_utf8_job_cursor() {
         // Create invalid base64 that decodes to invalid UTF-8
         use base64::{Engine as _, engine::general_purpose};
         let invalid_utf8 = general_purpose::STANDARD.encode([0xff, 0xfe, 0xfd]);
-        let result = parse_cursor(&invalid_utf8);
+        let result = parse_job_cursor(&invalid_utf8);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code.to_string(), "VALIDATION_FAILED");
     }
 
     #[test]
-    fn test_parse_invalid_json_cursor() {
+    fn test_parse_invalid_json_job_cursor() {
         use base64::{Engine as _, engine::general_purpose};
         let invalid_json = general_purpose::STANDARD.encode("not valid json");
-        let result = parse_cursor(&invalid_json);
+        let result = parse_job_cursor(&invalid_json);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code.to_string(), "VALIDATION_FAILED");
     }
 
     #[test]
-    fn test_parse_incomplete_cursor() {
+    fn test_parse_incomplete_job_cursor() {
         // Missing 'id' field
-        let incomplete_json = r#"{"scheduled_at":"2021-01-01T00:00:00Z"}"#;
+        let incomplete_json = r#"{"version":1,"keys":{"scheduled_at":"2021-01-01T00:00:00Z"}}"#;
         use base64::{Engine as _, engine::general_purpose};
         let encoded = general_purpose::STANDARD.encode(incomplete_json);
-        let result = parse_cursor(&encoded);
+        let result = parse_job_cursor(&encoded);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code.to_string(), "VALIDATION_FAILED");
     }

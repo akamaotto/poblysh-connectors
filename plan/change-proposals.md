@@ -43,10 +43,10 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 
 33) update-api-pagination-and-cursors — Stable ordering, `next_cursor`.
 34) add-normalization-fixtures — Golden tests for `Signal.kind` mapping.
+
 35) add-local-run-scripts — Makefile/justfile tasks (no Docker).
 36) add-e2e-smoke-tests-local — Boot API, hit core endpoints against local DB.
 37) docs-polish-and-runbooks-local — Update PRD/Tech Spec/API; local crypto rotation runbook.
-
 38) add-dockerization-post-mvp — Containerize service and Postgres for deployment prep.
 
 Note: Dockerization is intentionally scheduled late (post-MVP) per project preference.

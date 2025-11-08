@@ -1,0 +1,13 @@
+{
+  "provider": "example",
+  "name": "pr_merged",
+  "input": {
+    "action": "closed",
+    "merged": true,
+    "title": "Fix authentication bug",
+    "number": 42
+  },
+  "expected": {
+    "kind": "pr_merged"
+  }
+}

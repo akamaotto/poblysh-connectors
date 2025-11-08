@@ -1,7 +1,7 @@
 # crypto Specification
 
 ## Purpose
-TBD - created by archiving change add-local-token-encryption. Update Purpose after archive.
+This specification defines the cryptographic system for protecting sensitive data at rest, specifically access and refresh tokens stored in the database. It targets developers and security engineers who need to understand how AES-256-GCM encryption is implemented, how keys are managed, and what operational considerations apply to token encryption and decryption in the Connectors API.
 ## Requirements
 ### Requirement: Token Encryption (AES-256-GCM)
 The system SHALL encrypt and authenticate access/refresh tokens at rest using AES‑256‑GCM with a 256‑bit key derived from `POBLYSH_CRYPTO_KEY`.

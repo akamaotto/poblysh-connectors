@@ -9,6 +9,7 @@ pub mod grounded_signals;
 pub mod jobs;
 pub mod providers;
 pub mod signals;
+pub mod types;
 pub mod webhooks;
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};

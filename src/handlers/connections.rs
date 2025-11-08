@@ -4,6 +4,7 @@
 //! including tenant-scoped connection listing with optional provider filtering.
 
 use crate::auth::{OperatorAuth, TenantExtension, TenantHeader};
+use crate::cursor::decode_generic_cursor;
 use crate::error::ApiError;
 use crate::repositories::connection::ConnectionRepository;
 use crate::repositories::provider::ProviderRepository;
@@ -24,6 +25,10 @@ use uuid::Uuid;
 pub struct ListConnectionsQuery {
     /// Optional provider filter (snake_case slug, e.g., "github")
     pub provider: Option<String>,
+    /// Maximum number of connections to return (default: 50, max: 100)
+    pub limit: Option<i64>,
+    /// Opaque cursor for pagination continuation
+    pub cursor: Option<String>,
 }
 
 /// Connection information for API responses
@@ -74,6 +79,8 @@ impl From<crate::models::connection::Model> for ConnectionInfo {
 pub struct ConnectionsResponse {
     /// List of connections for the tenant
     pub connections: Vec<ConnectionInfo>,
+    /// Opaque cursor for fetching the next page (null if this is the last page)
+    pub next_cursor: Option<String>,
 }
 
 /// Lists connections for the authenticated tenant with optional provider filtering
@@ -83,7 +90,20 @@ pub struct ConnectionsResponse {
     security(("bearer_auth" = [])),
     params(TenantHeader, ListConnectionsQuery),
     responses(
-        (status = 200, description = "List of tenant connections", body = ConnectionsResponse),
+        (status = 200, description = "List of tenant connections", body = ConnectionsResponse, example = json!({
+            "connections": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "provider": "github",
+                    "expires_at": "2024-12-31T23:59:59Z",
+                    "metadata": {"login": "user123"},
+                    "has_access_token": true,
+                    "has_refresh_token": true,
+                    "token_encryption_version": 1
+                }
+            ],
+            "next_cursor": null
+        })),
         (status = 400, description = "Validation error", body = ApiError),
         (status = 401, description = "Unauthorized", body = ApiError)
     ),
@@ -95,11 +115,33 @@ pub async fn list_connections(
     TenantExtension(tenant): TenantExtension,
     Query(query): Query<ListConnectionsQuery>,
 ) -> Result<Json<ConnectionsResponse>, ApiError> {
+    // Validate and parse limit
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "limit must be between 1 and 100",
+        ));
+    }
+
+    // Validate cursor if provided
+    if let Some(ref cursor_str) = query.cursor {
+        // Try to decode the cursor to validate format
+        decode_generic_cursor(cursor_str).map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "cursor is not valid base64-encoded JSON",
+            )
+        })?;
+    }
+
     let connection_repo =
         ConnectionRepository::new(Arc::new(state.db.clone()), state.crypto_key.clone());
     let provider_repo = ProviderRepository::new(Arc::new(state.db.clone()));
 
-    let connections = match query.provider {
+    let (connections, next_cursor) = match query.provider {
         Some(provider_slug) => {
             // Validate provider exists in registry
             if provider_repo.find_by_slug(&provider_slug).await?.is_none() {
@@ -110,28 +152,25 @@ pub async fn list_connections(
                 ));
             }
 
-            // Filter by tenant and provider
+            // Filter by tenant and provider with pagination
             connection_repo
-                .find_by_tenant_and_provider(&tenant.0, &provider_slug)
+                .list_by_tenant_provider(&tenant.0, &provider_slug, limit as u64, query.cursor)
                 .await?
         }
         None => {
-            // Get all connections for tenant
-            connection_repo.find_by_tenant(&tenant.0).await?
+            // Get all connections for tenant with pagination
+            connection_repo
+                .list_by_tenant(&tenant.0, limit as u64, query.cursor)
+                .await?
         }
     };
 
-    // Sort by id ascending for stable ordering as per spec
-    let mut sorted_connections = connections;
-    sorted_connections.sort_by(|a, b| a.id.cmp(&b.id));
-
-    let connection_infos: Vec<ConnectionInfo> = sorted_connections
-        .into_iter()
-        .map(ConnectionInfo::from)
-        .collect();
+    let connection_infos: Vec<ConnectionInfo> =
+        connections.into_iter().map(ConnectionInfo::from).collect();
 
     Ok(Json(ConnectionsResponse {
         connections: connection_infos,
+        next_cursor,
     }))
 }
 
@@ -251,7 +290,10 @@ mod tests {
             token_encryption_version: 1,
         }];
 
-        let response = ConnectionsResponse { connections };
+        let response = ConnectionsResponse {
+            connections,
+            next_cursor: None,
+        };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: ConnectionsResponse = serde_json::from_str(&json).unwrap();
 
@@ -264,15 +306,66 @@ mod tests {
         // Test with provider parameter
         let query = ListConnectionsQuery {
             provider: Some("github".to_string()),
+            limit: None,
+            cursor: None,
         };
         let json = serde_json::to_string(&query).unwrap();
         let parsed: ListConnectionsQuery = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.provider, Some("github".to_string()));
 
         // Test without provider parameter
-        let query = ListConnectionsQuery { provider: None };
+        let query = ListConnectionsQuery {
+            provider: None,
+            limit: None,
+            cursor: None,
+        };
         let json = serde_json::to_string(&query).unwrap();
         let parsed: ListConnectionsQuery = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.provider, None);
+    }
+
+    #[tokio::test]
+    async fn test_connections_response_includes_next_cursor_field() {
+        // Test that the response JSON always includes the next_cursor field, even when null
+        let connections = vec![ConnectionInfo {
+            id: Uuid::new_v4(),
+            provider: "github".to_string(),
+            expires_at: None,
+            metadata: serde_json::json!({}),
+            has_access_token: false,
+            has_refresh_token: false,
+            token_encryption_version: 1,
+        }];
+
+        // Test response with null next_cursor (final page)
+        let response = ConnectionsResponse {
+            connections,
+            next_cursor: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+
+        // Verify the JSON contains the next_cursor field
+        assert!(json.contains("next_cursor"));
+        assert!(json.contains("null"));
+
+        // Verify we can parse it back and the field is present
+        let parsed: ConnectionsResponse = serde_json::from_str(&json).unwrap();
+        assert!(parsed.next_cursor.is_none());
+
+        // Test response with non-null next_cursor (more pages available)
+        let response_with_cursor = ConnectionsResponse {
+            connections: vec![],
+            next_cursor: Some("eyJ2ZXJzaW9uIjoxLCJrZXlzIjp7Im5hbWUiOiJnaXRodWIifX0=".to_string()),
+        };
+        let json_with_cursor = serde_json::to_string(&response_with_cursor).unwrap();
+
+        // Verify the JSON contains the next_cursor field with a value
+        assert!(json_with_cursor.contains("next_cursor"));
+        assert!(!json_with_cursor.contains("null"));
+
+        // Verify we can parse it back and the field is present with value
+        let parsed_with_cursor: ConnectionsResponse =
+            serde_json::from_str(&json_with_cursor).unwrap();
+        assert!(parsed_with_cursor.next_cursor.is_some());
     }
 }

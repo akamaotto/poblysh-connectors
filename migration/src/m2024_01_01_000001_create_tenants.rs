@@ -16,12 +16,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Tenants::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Tenants::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(Tenants::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Tenants::Name).text().null())
                     .col(
                         ColumnDef::new(Tenants::CreatedAt)

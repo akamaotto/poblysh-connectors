@@ -22,6 +22,7 @@ use crate::connectors::{
     },
 };
 use crate::models::{connection::Model as Connection, signal::Model as Signal};
+use crate::normalization::SignalKind;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -994,16 +995,18 @@ impl Connector for GitHubConnector {
                     }
 
                     for issue in &issues {
+                        let signal_kind = if issue.pull_request.is_some() {
+                            SignalKind::PrUpdated
+                        } else {
+                            SignalKind::IssueUpdated
+                        };
+
                         let signal = Signal {
                             id: Uuid::new_v4(),
                             tenant_id: params.connection.tenant_id,
                             provider_slug: "github".to_string(),
                             connection_id: params.connection.id,
-                            kind: if issue.pull_request.is_some() {
-                                "pr_updated".to_string()
-                            } else {
-                                "issue_updated".to_string()
-                            },
+                            kind: signal_kind.as_str().to_string(),
                             occurred_at: issue.updated_at.unwrap_or(issue.created_at).into(),
                             received_at: DateTime::from(Utc::now()),
                             payload: serde_json::to_value(issue)?,
@@ -1068,7 +1071,7 @@ impl Connector for GitHubConnector {
                             tenant_id: params.connection.tenant_id,
                             provider_slug: "github".to_string(),
                             connection_id: params.connection.id,
-                            kind: "pr_updated".to_string(),
+                            kind: SignalKind::PrUpdated.as_str().to_string(),
                             occurred_at: pull.updated_at.unwrap_or(pull.created_at).into(),
                             received_at: DateTime::from(Utc::now()),
                             payload: serde_json::to_value(pull)?,
@@ -1116,7 +1119,7 @@ impl Connector for GitHubConnector {
                 tenant_id: params.connection.tenant_id,
                 provider_slug: "github".to_string(),
                 connection_id: params.connection.id,
-                kind: "pr_updated".to_string(),
+                kind: SignalKind::PrUpdated.as_str().to_string(),
                 occurred_at: now.into(),
                 received_at: DateTime::from(now),
                 payload: serde_json::json!({
@@ -1284,14 +1287,16 @@ impl Connector for GitHubConnector {
             "issues" => {
                 if let Some(issue) = params.payload.get("issue") {
                     let kind = match action {
-                        "opened" => "issue_created",
-                        "closed" => "issue_closed",
-                        "reopened" => "issue_reopened",
-                        "edited" => "issue_updated", // Not in MVP spec but included for completeness
-                        _ => {
-                            debug!("Unhandled issue action: {}", action);
-                            return Ok(vec![]);
-                        }
+                        "opened" => Some(SignalKind::IssueCreated),
+                        "closed" => Some(SignalKind::IssueClosed),
+                        "reopened" => Some(SignalKind::IssueReopened),
+                        "edited" => Some(SignalKind::IssueUpdated),
+                        _ => None,
+                    };
+
+                    let Some(kind) = kind else {
+                        debug!("Unhandled issue action: {}", action);
+                        return Ok(vec![]);
                     };
 
                     // Use timestamp from payload when available
@@ -1307,7 +1312,7 @@ impl Connector for GitHubConnector {
                         tenant_id: params.tenant_id,
                         provider_slug: "github".to_string(),
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
-                        kind: kind.to_string(),
+                        kind: kind.as_str().to_string(),
                         occurred_at: occurred_at.into(),
                         received_at: now,
                         payload: issue.clone(),
@@ -1325,24 +1330,26 @@ impl Connector for GitHubConnector {
             "pull_request" => {
                 if let Some(pull_request) = params.payload.get("pull_request") {
                     let kind = match action {
-                        "opened" => "pr_created",
+                        "opened" => Some(SignalKind::PrOpened),
                         "closed" => {
                             if pull_request
                                 .get("merged")
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(false)
                             {
-                                "pr_merged"
+                                Some(SignalKind::PrMerged)
                             } else {
-                                "pr_closed"
+                                Some(SignalKind::PrClosed)
                             }
                         }
-                        "reopened" => "pr_reopened", // Not in MVP spec but included for completeness
-                        "edited" => "pr_updated", // Not in MVP spec but included for completeness
-                        _ => {
-                            debug!("Unhandled pull request action: {}", action);
-                            return Ok(vec![]);
-                        }
+                        "reopened" => Some(SignalKind::PrReopened),
+                        "edited" => Some(SignalKind::PrUpdated),
+                        _ => None,
+                    };
+
+                    let Some(kind) = kind else {
+                        debug!("Unhandled pull request action: {}", action);
+                        return Ok(vec![]);
                     };
 
                     // Use timestamp from payload when available
@@ -1358,7 +1365,7 @@ impl Connector for GitHubConnector {
                         tenant_id: params.tenant_id,
                         provider_slug: "github".to_string(),
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
-                        kind: kind.to_string(),
+                        kind: kind.as_str().to_string(),
                         occurred_at: occurred_at.into(),
                         received_at: now,
                         payload: pull_request.clone(),
@@ -1375,7 +1382,7 @@ impl Connector for GitHubConnector {
             }
             "issue_comment" => {
                 if let Some(comment) = params.payload.get("comment") {
-                    let kind = "issue_comment";
+                    let kind = SignalKind::IssueComment;
 
                     // Use timestamp from payload when available
                     let occurred_at = comment
@@ -1390,7 +1397,7 @@ impl Connector for GitHubConnector {
                         tenant_id: params.tenant_id,
                         provider_slug: "github".to_string(),
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
-                        kind: kind.to_string(),
+                        kind: kind.as_str().to_string(),
                         occurred_at: occurred_at.into(),
                         received_at: now,
                         payload: comment.clone(),
@@ -1407,7 +1414,7 @@ impl Connector for GitHubConnector {
             }
             "pull_request_review" => {
                 if let Some(review) = params.payload.get("review") {
-                    let kind = "pr_review";
+                    let kind = SignalKind::PrReview;
 
                     // Use timestamp from payload when available
                     let occurred_at = review
@@ -1423,7 +1430,7 @@ impl Connector for GitHubConnector {
                         tenant_id: params.tenant_id,
                         provider_slug: "github".to_string(),
                         connection_id: primary_connection_id.unwrap(), // Use resolved primary connection
-                        kind: kind.to_string(),
+                        kind: kind.as_str().to_string(),
                         occurred_at: occurred_at.into(),
                         received_at: now,
                         payload: review.clone(),

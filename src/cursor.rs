@@ -7,10 +7,20 @@ use crate::error::ApiError;
 use axum::http::StatusCode;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Re-export the CursorData from repositories to avoid duplication
 pub use crate::repositories::signal::CursorData;
+
+/// Generic cursor data that can be serialized with different sort keys
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenericCursor {
+    /// Version of the cursor format for future compatibility
+    pub version: u8,
+    /// Sort keys as a JSON object to enable flexible ordering
+    pub keys: serde_json::Value,
+}
 
 /// Encode cursor data as an opaque base64 string
 pub fn encode_cursor(occurred_at: &DateTime<Utc>, id: &Uuid) -> String {
@@ -20,6 +30,103 @@ pub fn encode_cursor(occurred_at: &DateTime<Utc>, id: &Uuid) -> String {
     };
     let json = serde_json::to_string(&cursor_data).unwrap();
     base64::engine::general_purpose::STANDARD.encode(json.as_bytes())
+}
+
+/// Encode generic cursor data with custom sort keys
+pub fn encode_generic_cursor(keys: serde_json::Value) -> String {
+    let cursor_data = GenericCursor { version: 1, keys };
+    let json = serde_json::to_string(&cursor_data).unwrap();
+    base64::engine::general_purpose::STANDARD.encode(json.as_bytes())
+}
+
+/// Decode generic cursor data from an opaque base64 string with validation
+pub fn decode_generic_cursor(cursor: &str) -> Result<GenericCursor, ApiError> {
+    // Check cursor length to prevent extremely large inputs
+    if cursor.len() > 1000 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor is too long",
+        ));
+    }
+
+    // Check for empty cursor
+    if cursor.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor cannot be empty",
+        ));
+    }
+
+    // Validate base64 format
+    if !cursor
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor contains invalid characters",
+        ));
+    }
+
+    // Decode base64
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(cursor)
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "VALIDATION_FAILED",
+                "cursor is not valid base64",
+            )
+        })?;
+
+    // Check decoded size
+    if decoded.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor is empty after decoding",
+        ));
+    }
+
+    if decoded.len() > 500 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "decoded cursor is too large",
+        ));
+    }
+
+    // Convert to UTF-8 string
+    let json = String::from_utf8(decoded).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor contains invalid UTF-8 data",
+        )
+    })?;
+
+    // Parse JSON
+    let cursor_data: GenericCursor = serde_json::from_str(&json).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor contains invalid JSON structure",
+        )
+    })?;
+
+    // Validate cursor version
+    if cursor_data.version != 1 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "cursor version is not supported",
+        ));
+    }
+
+    Ok(cursor_data)
 }
 
 /// Decode cursor data from an opaque base64 string with validation
@@ -299,5 +406,79 @@ mod tests {
         let old_cursor = encode_cursor(&old_timestamp, &id);
         let result = decode_cursor(&old_cursor);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_generic_cursor_encoding_decoding() {
+        let keys = serde_json::json!({
+            "created_at": "2024-01-15T10:30:00Z",
+            "id": "550e8400-e29b-41d4-a716-446655440000"
+        });
+
+        let cursor_str = encode_generic_cursor(keys.clone());
+        let decoded = decode_generic_cursor(&cursor_str).unwrap();
+
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.keys, keys);
+    }
+
+    #[test]
+    fn test_generic_cursor_validation() {
+        // Test invalid base64
+        let result = decode_generic_cursor("invalid-base64!");
+        assert!(result.is_err());
+
+        // Test empty cursor
+        let result = decode_generic_cursor("");
+        assert!(result.is_err());
+
+        // Test cursor too long
+        let long_cursor = "a".repeat(1001);
+        let result = decode_generic_cursor(&long_cursor);
+        assert!(result.is_err());
+
+        // Test invalid JSON
+        let invalid_json = base64::engine::general_purpose::STANDARD.encode("invalid json");
+        let result = decode_generic_cursor(&invalid_json);
+        assert!(result.is_err());
+
+        // Test unsupported version
+        let _cursor_str = encode_generic_cursor(serde_json::json!({
+            "version": 2,
+            "keys": {"id": "test"}
+        }));
+        // Manually create a cursor with wrong version
+        let wrong_version = base64::engine::general_purpose::STANDARD
+            .encode(r#"{"version":2,"keys":{"id":"test"}}"#);
+        let result = decode_generic_cursor(&wrong_version);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cursor_round_trip_compatibility() {
+        // Test that the new generic cursor can handle the same data as the original signal cursor
+        let occurred_at = Utc::now();
+        let id = Uuid::new_v4();
+
+        let original_cursor = encode_cursor(&occurred_at, &id);
+        let original_decoded = decode_cursor(&original_cursor).unwrap();
+
+        // Create equivalent generic cursor
+        let generic_keys = serde_json::json!({
+            "occurred_at": occurred_at.to_rfc3339(),
+            "id": id.to_string()
+        });
+        let generic_cursor = encode_generic_cursor(generic_keys);
+        let generic_decoded = decode_generic_cursor(&generic_cursor).unwrap();
+
+        // Both should have the same essential data
+        assert_eq!(
+            original_decoded.occurred_at.to_rfc3339(),
+            generic_decoded.keys["occurred_at"].as_str().unwrap()
+        );
+        assert_eq!(
+            original_decoded.id.to_string(),
+            generic_decoded.keys["id"].as_str().unwrap()
+        );
     }
 }

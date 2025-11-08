@@ -86,6 +86,30 @@ Controls database connection settings.
 | `db_max_connections` | Integer | `10` | Maximum number of database connections |
 | `db_acquire_timeout_ms` | Integer | `5000` | Connection acquire timeout in milliseconds |
 
+### Crypto Configuration
+
+Controls cryptographic settings for token encryption.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `crypto_key` | String (secret) | **required** | Base64-encoded 32-byte key for AES-256-GCM token encryption |
+
+**Important**: The `POBLYSH_CRYPTO_KEY` environment variable is **required** in all profiles. It must be a base64-encoded string that decodes to exactly 32 bytes (256 bits). This key is used to encrypt and decrypt access/refresh tokens at rest using AES-256-GCM.
+
+**Generate a crypto key**:
+```bash
+# Generate a 32-byte key and encode it as base64
+openssl rand -base64 32
+```
+
+**Validation requirements**:
+- Must be present (startup fails if missing)
+- Must be valid base64 with proper padding
+- Must decode to exactly 32 bytes
+- Invalid keys will cause startup failure with descriptive error messages
+
+For detailed key rotation procedures, see [Local Crypto Rotation Runbook](runbooks/local-crypto-rotation.md).
+
 ### Logging Configuration
 
 Controls application logging behavior.
@@ -136,6 +160,9 @@ url = "postgresql://localhost/poblysh"
 max_connections = 10
 acquire_timeout_ms = 5000
 
+[crypto]
+key = "your-base64-encoded-32-byte-key-here"
+
 [logging]
 level = "info"
 format = "json"
@@ -166,6 +193,9 @@ request_timeout = 30
     "url": "postgresql://localhost/poblysh",
     "max_connections": 10,
     "acquire_timeout_ms": 5000
+  },
+  "crypto": {
+    "key": "your-base64-encoded-32-byte-key-here"
   },
   "logging": {
     "level": "info",
@@ -201,6 +231,9 @@ database:
   max_connections: 10
   acquire_timeout_ms: 5000
 
+crypto:
+  key: "your-base64-encoded-32-byte-key-here"
+
 logging:
   level: "info"
   format: "json"
@@ -234,6 +267,9 @@ export POBLYSH_SERVER__WORKERS=8
 export POBLYSH_DATABASE_URL=postgresql://user:pass@localhost/mydb
 export POBLYSH_DB_MAX_CONNECTIONS=20
 export POBLYSH_DB_ACQUIRE_TIMEOUT_MS=2000
+
+# Crypto configuration (required)
+export POBLYSH_CRYPTO_KEY=<base64-encoded-32-byte-key>
 
 # Logging configuration
 export POBLYSH_LOGGING__LEVEL=debug
@@ -303,6 +339,12 @@ The configuration system validates all configuration values before the applicati
   - Max connections cannot be 0
   - Min connections cannot be greater than max connections
 
+- **Crypto Configuration**:
+  - Crypto key must be present (required field)
+  - Must be valid base64 with proper padding
+  - Must decode to exactly 32 bytes (256 bits)
+  - Invalid keys will cause startup failure
+
 - **Logging Configuration**:
   - Log level must be one of: `trace`, `debug`, `info`, `warn`, `error`
   - Log format must be one of: `json`, `text`
@@ -330,6 +372,7 @@ The configuration system automatically redacts sensitive information when loggin
 The following fields are automatically redacted:
 - `database.url`
 - `auth.jwt_secret`
+- `crypto_key`
 - Any field containing "password", "secret", "token", "key", "auth", "credential", or "private"
 
 ### Example

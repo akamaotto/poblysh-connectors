@@ -283,7 +283,7 @@ impl TokenRefreshService {
                 ApiError::new(
                     axum::http::StatusCode::NOT_FOUND,
                     "NOT_FOUND",
-                    &format!(
+                    format!(
                         "Connector for provider '{}' not found",
                         connection.provider_slug
                     ),
