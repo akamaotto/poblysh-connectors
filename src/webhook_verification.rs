@@ -34,10 +34,10 @@ fn validate_operator_token(config: &AppConfig, token: &str) -> bool {
 
 /// Extracts and validates operator bearer token from headers
 fn check_operator_auth(config: &AppConfig, headers: &HeaderMap) -> bool {
-    if let Some(auth_header) = headers.get("authorization").and_then(|h| h.to_str().ok()) {
-        if let Some(token) = auth_header.strip_prefix("Bearer ") {
-            return validate_operator_token(config, token);
-        }
+    if let Some(auth_header) = headers.get("authorization").and_then(|h| h.to_str().ok())
+        && let Some(token) = auth_header.strip_prefix("Bearer ")
+    {
+        return validate_operator_token(config, token);
     }
     false
 }

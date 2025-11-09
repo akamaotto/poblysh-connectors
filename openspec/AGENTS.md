@@ -453,3 +453,44 @@ openspec archive <change-id> [--yes|-y]  # Mark complete (add --yes for automati
 ```
 
 Remember: Specs are truth. Changes are proposals. Keep them in sync.
+
+## Next.js Demo Subproject Guidance
+
+The repository includes a `examples/nextjs-demo` subproject that provides a pure mock UX sandbox for the Poblysh ↔ Connectors integration journey.
+
+Key points for assistants:
+
+- Treat `examples/nextjs-demo` as:
+  - Mode A: fully mocked, no real Connectors API calls, no real OAuth, no secrets.
+  - A teaching and exploration tool for:
+    - Login and user context (mock)
+    - Tenant creation and tenant ↔ connectorsTenantId mapping
+    - Mock connector flows (e.g., GitHub, Zoho Cliq)
+    - Mock scan to produce signals
+    - Signals listing and filtering
+    - Mock grounding of signals into grounded signals with scores/evidence
+
+- When planning or modifying this subproject:
+  - Prefer small, verb-led OpenSpec changes under `openspec/changes/` following:
+    - The backlog in `plan/change-proposals.md` under “Change Backlog for Examples/ NextJS Demo Sub Project”
+    - The dedicated planning docs in `plan/nextjs-demo/`:
+      - `prd.md`
+      - `tech-specs.md`
+      - `api-plan.md`
+      - `ui.md`
+  - Keep Mode A constraints:
+    - No integration with live Connectors endpoints
+    - No operator tokens or `X-Tenant-Id` headers on the wire
+    - All behavior clearly labeled as mock/demo-only
+
+- If a request involves:
+  - Wiring the Next.js demo to real Connectors APIs
+  - Using operator tokens or real OAuth flows
+  Then:
+  - Treat this as Mode B (real integration reference)
+  - Require a separate, explicit OpenSpec change before implementation
+  - Ensure the Mode B work remains opt-in and does not change Mode A guarantees
+
+Use the Next.js demo as:
+- A reference for frontend architecture and UX flows.
+- A safe environment to experiment with Connectors concepts without affecting production behavior.

@@ -319,3 +319,7 @@ cargo run
 - `/` - Root endpoint that returns basic service information
 - `/docs` - Swagger UI for interactive API documentation
 - `/openapi.json` - OpenAPI specification in JSON format
+
+## Integration Documentation
+
+- **[Connectors Service Integration Guide](docs/integration/connectors-service.md)** - Canonical guide for Poblysh Core and frontend integration with the Connectors Service, including authentication, tenancy, and end-to-end flows

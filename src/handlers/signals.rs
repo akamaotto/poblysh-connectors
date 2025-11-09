@@ -12,11 +12,11 @@ use axum::{extract::Query, extract::State, http::StatusCode, response::Json};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Query parameters for listing signals
-#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ListSignalsQuery {
     /// Filter by provider slug
     pub provider: Option<String>,
@@ -76,7 +76,16 @@ pub struct SignalsResponse {
     get,
     path = "/signals",
     security(("bearer_auth" = [])),
-    params(ListSignalsQuery),
+    params(
+        ("provider" = Option<String>, Query, description = "Filter by provider slug"),
+        ("connection_id" = Option<String>, Query, description = "Filter by connection ID (UUID)"),
+        ("kind" = Option<String>, Query, description = "Filter by signal kind"),
+        ("occurred_after" = Option<String>, Query, description = "Filter for signals that occurred after this timestamp (RFC3339)"),
+        ("occurred_before" = Option<String>, Query, description = "Filter for signals that occurred before this timestamp (RFC3339)"),
+        ("limit" = Option<i64>, Query, description = "Maximum number of signals to return (default: 50, max: 100)"),
+        ("cursor" = Option<String>, Query, description = "Opaque cursor for pagination continuation"),
+        ("include_payload" = Option<bool>, Query, description = "Whether to include the full payload (default: false)")
+    ),
     responses(
         (status = 200, description = "Signals listed successfully", body = SignalsResponse, example = json!({
             "signals": [

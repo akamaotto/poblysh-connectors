@@ -737,6 +737,7 @@ pub async fn ingest_public_webhook(
 }
 
 /// Generate a GitHub HMAC-SHA256 signature for testing
+#[allow(dead_code)]
 fn generate_github_signature(body: &str, secret: &str) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
@@ -750,6 +751,7 @@ fn generate_github_signature(body: &str, secret: &str) -> String {
 }
 
 /// Generate a Slack v2 signature for testing
+#[allow(dead_code)]
 fn generate_slack_signature(body: &str, timestamp: &str, secret: &str) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;

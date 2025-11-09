@@ -1099,23 +1099,7 @@ mod tests {
     };
     use uuid::Uuid;
 
-    struct EnvVarGuard {
-        key: &'static str,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            unsafe { std::env::set_var(key, value) };
-            Self { key }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            unsafe { std::env::remove_var(self.key) };
-        }
-    }
-
+    
     #[tokio::test]
     async fn test_jira_authorize_url_shape() {
         let connector = JiraConnector::new(
@@ -1342,7 +1326,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_jira_exchange_token_stub() {
-        let _guard = EnvVarGuard::set("JIRA_TEST_MODE", "1");
+        // Temporarily set the global env var for this test
+        let original_env = std::env::var("JIRA_TEST_MODE").ok();
+        unsafe { std::env::set_var("JIRA_TEST_MODE", "1"); }
+
+        // Ensure cleanup happens even if test panics
+        let _cleanup_guard = scopeguard::guard((), |_| {
+            if let Some(original) = original_env {
+                unsafe { std::env::set_var("JIRA_TEST_MODE", original); }
+            } else {
+                unsafe { std::env::remove_var("JIRA_TEST_MODE"); }
+            }
+        });
         let connector = JiraConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),
@@ -1370,7 +1365,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_jira_refresh_token_stub() {
-        let _guard = EnvVarGuard::set("JIRA_TEST_MODE", "1");
+        // Temporarily set the global env var for this test
+        let original_env = std::env::var("JIRA_TEST_MODE").ok();
+        unsafe { std::env::set_var("JIRA_TEST_MODE", "1"); }
+
+        // Ensure cleanup happens even if test panics
+        let _cleanup_guard = scopeguard::guard((), |_| {
+            if let Some(original) = original_env {
+                unsafe { std::env::set_var("JIRA_TEST_MODE", original); }
+            } else {
+                unsafe { std::env::remove_var("JIRA_TEST_MODE"); }
+            }
+        });
+
         let connector = JiraConnector::new(
             "test-client-id".to_string(),
             "test-client-secret".to_string(),

@@ -1,0 +1,199 @@
+# Implementation Tasks: Establish Next.js Demo Skeleton
+
+## Overview
+Ordered list of small, verifiable work items to transform the existing `examples/nextjs-demo` into a comprehensive mock UX sandbox.
+
+## Tasks
+
+### Phase 1: Foundation Setup
+
+1. **Update demo README with mock UX context**
+   - Replace generic Next.js README with demo-specific documentation
+   - Add clear explanation of mock-only nature
+   - Include setup instructions and educational purpose
+   - Reference plan documents and related OpenSpec changes
+
+2. **Create mock domain types**
+   - Define `DemoUser`, `DemoTenant`, `DemoConnection`, `DemoSignal`, `DemoGroundedSignal` types
+   - Add supporting types like `DemoEvidenceItem`
+   - Include comprehensive TypeScript interfaces with JSDoc comments
+   - Place in `lib/demo/types.ts`
+
+3. **Implement React Context state management**
+   - Create `DemoProvider` context component
+   - Implement state reducer for user/tenant/connections/signals/groundedSignals
+   - Add custom hooks: `useDemoUser()`, `useDemoTenant()`, etc.
+   - Include state persistence helpers (localStorage optional)
+   - Place in `lib/demo/state.ts`
+
+4. **Create mock data generators**
+   - Implement deterministic ID generation utilities
+   - Create seeded generators for each entity type
+   - Add realistic signal generators for GitHub and Zoho Cliq
+   - Include evidence generation for grounding scenarios
+   - Place in `lib/demo/mockData.ts`
+
+### Phase 2: Core UI Components
+
+5. **Create demo layout and navigation**
+   - Update `app/layout.tsx` to include `DemoProvider`
+   - Add `DemoNavbar` component with progress indicator
+   - Create `MockBadge` component for "Mock Demo" labeling
+   - Implement `ProgressBar` showing flow completion
+   - Add responsive layout structure
+
+6. **Implement landing page with mock login**
+   - Replace default `app/page.tsx` with demo landing
+   - Create centered login form with email input
+   - Add mock login flow with user creation
+   - Include educational annotations about mock authentication
+   - Add navigation to tenant setup
+
+7. **Create tenant creation and mapping page**
+   - Implement `app/tenant/page.tsx` with tenant creation form
+   - Add dual ID generation and display
+   - Create visual mapping explanation component
+   - Include educational notes about `X-Tenant-Id` usage
+   - Add navigation to integrations
+
+### Phase 3: Integration Management
+
+8. **Build integrations hub page**
+   - Implement `app/integrations/page.tsx` with provider grid
+   - Create `ProviderTile` component for GitHub and Zoho Cliq
+   - Add connection status display and management
+   - Implement mock OAuth consent modal
+   - Include educational notes about real OAuth flows
+
+9. **Implement GitHub connection flow**
+   - Add GitHub connection creation logic
+   - Create visual OAuth consent simulation
+   - Update connection state in context
+   - Add post-connection CTAs for signal scanning
+   - Include annotations about real Connectors endpoints
+
+10. **Add Zoho Cliq integration**
+    - Extend `ProviderTile` for Zoho Cliq provider
+    - Implement connection flow similar to GitHub
+    - Add Zoho-specific signal types and content
+    - Enable multi-provider scenarios for grounding demo
+
+### Phase 4: Signal Discovery
+
+11. **Create signals list page**
+    - Implement `app/signals/page.tsx` with list/table view
+    - Add provider filtering and search functionality
+    - Create signal loading and empty states
+    - Implement navigation to signal detail pages
+    - Add educational notes about real `/signals` API
+
+12. **Implement mock signal scanning**
+    - Add "Scan for signals" functionality
+    - Create loading states and progress indication
+    - Generate signals based on connected providers
+    - Update context with generated signals
+    - Include success/error handling patterns
+
+13. **Build signal detail view**
+    - Implement `app/signals/[id]/page.tsx` with signal details
+    - Create comprehensive signal metadata display
+    - Add collapsible JSON-style raw data view
+    - Include navigation back to signals list
+    - Add educational annotations about signal structure
+
+### Phase 5: Signal Grounding Demo
+
+14. **Implement signal grounding functionality**
+    - Add "Ground this signal" action on detail page
+    - Create grounding generation with scoring algorithm
+    - Implement evidence aggregation across providers
+    - Display results with score visualization
+    - Include explanations of grounding concepts
+
+15. **Create grounded signal display**
+    - Build `GroundedSignal` component for results
+    - Add dimensional score visualization (Relevance, Impact, etc.)
+    - Create evidence list grouped by source provider
+    - Include cross-connector relationship demonstration
+    - Add educational notes about production grounding
+
+### Phase 6: Polish and Documentation
+
+16. **Add comprehensive inline annotations**
+    - Place info hints with tooltips on key UI elements
+    - Add screen-level explanations about production equivalents
+    - Include code comments mapping mock to real API calls
+    - Create reference links to OpenSpec changes and API docs
+    - Ensure all major features have educational context
+
+17. **Implement responsive design improvements**
+    - Test and optimize for mobile layouts
+    - Ensure all interactions work on touch devices
+    - Add accessibility improvements (ARIA labels, keyboard navigation)
+    - Verify color contrast and readability
+    - Test with screen readers where possible
+
+18. **Add error handling and edge cases**
+    - Handle lost state on page refresh gracefully
+    - Add validation for form inputs
+    - Implement loading states for all async operations
+    - Add user-friendly error messages
+    - Include recovery options for failed operations
+
+### Phase 7: Integration and Validation
+
+19. **Update main project documentation**
+    - Add demo to main README with clear description
+    - Update integration guide to reference demo
+    - Add demo to developer onboarding checklist
+    - Include screenshots and setup instructions
+    - Cross-reference with related OpenSpec changes
+
+20. **End-to-end testing and validation**
+    - Test complete flow from login to grounding
+    - Verify all mock data is deterministic and realistic
+    - Check all educational annotations are accurate
+    - Validate responsive design on multiple devices
+    - Ensure demo runs without external dependencies
+
+21. **Performance optimization and cleanup**
+    - Optimize bundle size and loading performance
+    - Remove unused dependencies and code
+    - Add proper error boundaries
+    - Implement React performance optimizations where needed
+    - Clean up development artifacts
+
+## Dependencies and Prerequisites
+
+- Must have existing `examples/nextjs-demo` Next.js project
+- Requires `plan/nextjs-demo/` documents to be complete and approved
+- Related OpenSpec changes should be reviewed for consistency
+- Design system (Tailwind + shadcn/ui) should be properly configured
+
+## Validation Criteria
+
+Each task should be considered complete when:
+- Implementation matches requirements in corresponding spec
+- Code follows project conventions and patterns
+- Educational annotations are clear and accurate
+- Component is tested manually for basic functionality
+- No console errors or warnings in development mode
+
+## Parallel Work Opportunities
+
+- Tasks 2-4 (domain layer) can be worked in parallel
+- Tasks 6-7 (UI pages) can be developed simultaneously
+- Tasks 11-13 (signal pages) can be parallelized
+- Documentation tasks (16, 19) can overlap with development
+
+## Estimated Timeline
+
+- **Phase 1**: 1-2 days (Foundation)
+- **Phase 2**: 2-3 days (Core UI)
+- **Phase 3**: 2-3 days (Integrations)
+- **Phase 4**: 2-3 days (Signals)
+- **Phase 5**: 2-3 days (Grounding)
+- **Phase 6**: 1-2 days (Polish)
+- **Phase 7**: 1-2 days (Validation)
+
+**Total estimated effort**: 11-18 days depending on parallelization and experience level.

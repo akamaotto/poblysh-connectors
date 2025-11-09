@@ -50,3 +50,28 @@ Each item will be created as an OpenSpec change under `openspec/changes/<change-
 38) add-dockerization-post-mvp — Containerize service and Postgres for deployment prep.
 
 Note: Dockerization is intentionally scheduled late (post-MVP) per project preference.
+
+39) add-connectors-integration-guide — Document Poblysh ↔ Connectors service integration model, tenant mapping, and frontend/backend usage patterns.
+40) add-tenant-mapping-and-signals-ux — Specify tenant ID mapping rules, connection lifecycle UX, and signals retrieval flows for Poblysh tenants.
+
+
+
+# Change Backlog for Examples/ NextJS Demo Sub Project
+
+1) add-nextjs-demo-skeleton — Establish `examples/nextjs-demo` as a dedicated mock UX sandbox using Next.js App Router, Tailwind, and shadcn; add a landing page clearly labeled as mock-only.
+
+2) add-nextjs-demo-mock-domain-model — Introduce a small TypeScript domain model (`DemoUser`, `DemoTenant`, `DemoConnection`, `DemoSignal`, `DemoGroundedSignal`) and mock data utilities that mirror real Connectors concepts without any network calls.
+
+3) add-nextjs-demo-mock-auth-and-session-flow — Implement a simple email-based “sign in” flow that creates a demo session client-side, illustrating user identity without real authentication.
+
+4) add-nextjs-demo-tenant-creation-and-mapping — Add a tenant setup step where a company name is entered and mapped to a generated tenant id and a separate connectorsTenantId, visually demonstrating the `X-Tenant-Id` mapping concept.
+
+5) add-nextjs-demo-github-mock-connect-flow — Build a mock “Connect GitHub” experience on an integrations page that creates a `github` connection object (no real OAuth), annotated with where real `/connect/github` and callback handling would occur.
+
+6) add-nextjs-demo-mock-scan-and-signals-list — Add a “Scan GitHub” action that populates a mock `/signals` list for the active tenant, using realistic fields and filters to mirror the real `GET /signals` contract.
+
+7) add-nextjs-demo-signal-detail-and-grounding-mock — Provide a signal detail view with a “Ground this signal” action that generates a mock grounded signal (score, evidence, explanation) to illustrate the weak→grounded signal concept.
+
+8) add-nextjs-demo-zoho-cliq-mock-integration — Extend the demo with a Zoho Cliq mock connector, including connect/scan flows and cross-connector signals to show multi-provider behavior.
+
+9) add-nextjs-demo-docs-and-spec-alignment — Document how the Next.js demo maps to the Connectors integration guide and related OpenSpec changes, emphasizing that all behavior is mock-only and intended as a learning/reference tool.

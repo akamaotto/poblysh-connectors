@@ -44,6 +44,7 @@ Goals:
 - Tenant isolation: every connection and query scoped to `tenant_id`.
 - Config via environment variables (`POBLYSH_*`) suitable for localhost. Future production secret stores are out of scope for MVP.
 - API error model: problem+json-like shape `{ code, message, details?, retry_after? }`.
+- Integration: See `docs/integration/connectors-service.md` for the canonical guide on integrating Poblysh Core with the Connectors Service.
 
 ### Testing Strategy
 - Unit tests for provider adapters (HTTP mocked via `wiremock`), token crypto, webhook verification.

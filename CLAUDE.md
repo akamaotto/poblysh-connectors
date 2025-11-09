@@ -106,6 +106,8 @@ This project uses a specification-driven development workflow. Before implementi
 - `src/main.rs` - CLI commands and entry point
 - `src/config/mod.rs` - Configuration system
 - `src/models/` - SeaORM entity definitions
+- `plan/nextjs-demo/` - PRD, tech specs, API plan, and UI plan for the Next.js mock UX demo
+- `examples/nextjs-demo/` - Next.js App Router mock UX sandbox that demonstrates Poblysh ↔ Connectors flows (Mode A: pure mock, no real API calls)
 
 ### Current Implementation Status
 ✅ Database foundation with SeaORM
