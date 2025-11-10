@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DemoProvider } from "@/lib/demo/state";
-import { MockBadge } from "@/components/demo/MockBadge";
+import { DemoModeIndicator } from "@/components/DemoModeIndicator";
 import { DemoNavbar } from "@/components/demo/DemoNavbar";
 
 const geistSans = Geist({
@@ -31,7 +31,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white min-h-screen`}
       >
         <DemoProvider>
-          <MockBadge />
+          <DemoModeIndicator />
           <DemoNavbar />
           <main className="min-h-screen pt-16">
             {children}

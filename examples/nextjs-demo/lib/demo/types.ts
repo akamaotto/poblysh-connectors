@@ -378,6 +378,12 @@ export interface DemoApiError {
 }
 
 /**
+ * Demo mode configuration.
+ * Defines whether the demo runs in mock or real API mode.
+ */
+export type DemoMode = 'mock' | 'real';
+
+/**
  * Demo configuration interface.
  * Defines configurable parameters for demo behavior.
  */
@@ -390,6 +396,18 @@ export interface DemoConfig {
   timingMode: 'fast' | 'realistic';
   /** Provider complexity level */
   providerComplexity: 'simple' | 'detailed';
+  
+  // Runtime mode configuration
+  /** Current demo mode (mock vs real API) */
+  mode: DemoMode;
+  /** Connectors API base URL (for real mode) */
+  connectorsApiBaseUrl?: string;
+  /** Whether the current configuration is valid */
+  isConfigValid: boolean;
+  /** Configuration validation errors */
+  configErrors: string[];
+  /** Configuration validation warnings */
+  configWarnings: string[];
 }
 
 // ============================================================================

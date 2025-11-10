@@ -60,7 +60,7 @@ Note: Dockerization is intentionally scheduled late (post-MVP) per project prefe
 
 1) establish-nextjs-demo-skeleton — Establish `examples/nextjs-demo` as a dedicated mock UX sandbox using Next.js App Router, Tailwind, and shadcn; add a landing page clearly labeled as mock-only.
 
-2) add-nextjs-demo-mock-domain-model — Introduce a small TypeScript domain model (`DemoUser`, `DemoTenant`, `DemoConnection`, `DemoSignal`, `DemoGroundedSignal`) and mock data utilities that mirror real Connectors concepts without any network calls.
+2) enhance-nextjs-demo-mock-domain-model — Introduce a small TypeScript domain model (`DemoUser`, `DemoTenant`, `DemoConnection`, `DemoSignal`, `DemoGroundedSignal`) and mock data utilities that mirror real Connectors concepts without any network calls.
 
 3) add-nextjs-demo-mock-auth-and-session-flow — Implement a simple email-based “sign in” flow that creates a demo session client-side, illustrating user identity without real authentication.
 
@@ -75,3 +75,50 @@ Note: Dockerization is intentionally scheduled late (post-MVP) per project prefe
 8) add-nextjs-demo-zoho-cliq-mock-integration — Extend the demo with a Zoho Cliq mock connector, including connect/scan flows and cross-connector signals to show multi-provider behavior.
 
 9) add-nextjs-demo-docs-and-spec-alignment — Document how the Next.js demo maps to the Connectors integration guide and related OpenSpec changes, emphasizing that all behavior is mock-only and intended as a learning/reference tool.
+
+
+# Change Backlog for Integrating Rust API and the NextJS Demo Sub Project
+
+1) add-nextjs-demo-mode-toggle-and-config — Introduce a clear configuration model inside `examples/nextjs-demo` to support `mock` (Mode A) vs `real` (Mode B) behavior without creating a new project:
+   - Add `NEXT_PUBLIC_DEMO_MODE` (default `mock`) and `CONNECTORS_API_BASE_URL` env support.
+   - Add a small `demoConfig` helper in the Next.js demo to route calls appropriately.
+   - Keep existing mock UX as the default path.
+
+2) add-nextjs-demo-shared-backend-client — Add a thin, typed HTTP client in `examples/nextjs-demo/lib/demo` for talking to the Rust Connectors API:
+   - Attach operator bearer token and `X-Tenant-Id` headers as required.
+   - Provide helpers for core endpoints: providers, tenants, connections, signals.
+   - Ensure all calls are encapsulated (no scattered `fetch` usage).
+
+3) add-nextjs-demo-real-tenant-mapping-flow — Wire the existing tenant creation/mapping UI to the real Rust API when in Mode B:
+   - On tenant creation, call the backend to create/register a tenant.
+   - Store and display both frontend tenant id and backend `connectorsTenantId`.
+   - Use the real tenant identifiers for subsequent Mode B API calls.
+
+4) add-nextjs-demo-real-github-connect-flow — Implement a real GitHub OAuth-based connect flow using the Rust API:
+   - Use backend `POST /connect/github` (or equivalent) to obtain the authorize URL.
+   - Add a Next.js route for the GitHub OAuth callback that forwards `code`/`state` to the backend.
+   - Reflect real connection status in the integrations UI for the active tenant.
+
+5) add-nextjs-demo-real-gmail-connect-flow — Implement a real Gmail/Google Workspace connect flow via the Rust API:
+   - Mirror the GitHub pattern for `POST /connect/gmail` (or equivalent) and OAuth callback handling.
+   - Display Gmail connection state alongside GitHub within the existing integrations page.
+
+6) add-nextjs-demo-real-scan-and-signals-list — Integrate the signals UX with the real `/signals` backend:
+   - Trigger scans (if supported) or fetch latest signals for the active tenant from the Rust API.
+   - Display real or semi-real signals in the existing signals list UI when in Mode B.
+   - Preserve mock signal generation behavior for Mode A.
+
+7) add-nextjs-demo-real-signal-detail-and-grounding — Back the signal detail and grounding views with real backend data when available:
+   - Fetch individual signal details from the Rust API.
+   - If a grounding endpoint exists, call it; otherwise, clearly label grounding output as mock-on-real-sources.
+   - Ensure Mode A keeps its fully mock grounding behavior unchanged.
+
+8) add-nextjs-demo-mode-b-docs-and-setup — Document how to run Mode B end-to-end using the existing Rust API and the Next.js demo:
+   - Update `examples/nextjs-demo/README.md` with Mode B instructions, env vars, and OAuth app setup.
+   - Provide a minimal local run guide: start Rust API, configure GitHub/Gmail, run Next.js demo.
+   - Clearly distinguish Mode A (mock-only) vs Mode B (real integration) behavior in both code and docs.
+
+9) add-nextjs-demo-real-zoho-cliq-connect-and-cross-provider-flows — Extend Mode B to include Zoho Cliq as a first-class real (or realistically wired) connector:
+   - Ensure Zoho Cliq is modeled consistently in providers and connections for Mode B.
+   - Wire Zoho Cliq connect/scan UI to the Rust API (or a well-defined stub) so it mirrors the GitHub/Gmail integration pattern.
+   - Demonstrate cross-connector signals and grounding scenarios that combine GitHub and Zoho Cliq data in the real integration path.

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useEffect } from 'react';
 import {
   DemoState,
   DemoAction,
@@ -21,67 +21,92 @@ import {
   DemoAuthConfig
 } from './types';
 import { MOCK_AUTH_CONFIG } from './mockAuth';
+import { loadDemoConfig, validateConfiguration, logConfigurationValidation } from './demoConfig';
+
+/**
+ * Creates initial demo state with runtime configuration.
+ * Loads configuration from environment variables and validates it.
+ */
+function createInitialState(): DemoState {
+  // Load runtime configuration
+  const runtimeConfig = loadDemoConfig();
+  const validationResult = validateConfiguration();
+  
+  // Log validation results for debugging
+  if (typeof window !== 'undefined') {
+    logConfigurationValidation(validationResult);
+  }
+  
+  return {
+    user: null,
+    tenant: null,
+    providers: [],
+    connections: [],
+    signals: [],
+    groundedSignals: [],
+
+    // Entity collections
+    syncJobs: [],
+    webhooks: [],
+    tokens: [],
+    rateLimits: [],
+
+    // Enhanced authentication collections
+    authSessions: [],
+    authTokens: [],
+    providerAuths: [],
+    authEvents: [],
+    authConfig: MOCK_AUTH_CONFIG,
+
+    loading: {
+      connections: false,
+      signals: false,
+      grounding: false,
+      syncJobs: false,
+      webhooks: false,
+      tokens: false,
+      rateLimits: false,
+      authSessions: false,
+      authTokens: false,
+      providerAuths: false,
+      authEvents: false,
+    },
+    errors: {
+      connections: undefined,
+      signals: undefined,
+      grounding: undefined,
+      syncJobs: undefined,
+      webhooks: undefined,
+      tokens: undefined,
+      rateLimits: undefined,
+      authSessions: undefined,
+      authTokens: undefined,
+      providerAuths: undefined,
+      authEvents: undefined,
+    },
+
+    // Demo configuration with runtime values
+    config: {
+      signalFrequency: 'medium',
+      errorRate: '10%',
+      timingMode: 'realistic',
+      providerComplexity: 'detailed',
+      
+      // Runtime mode configuration
+      mode: runtimeConfig.mode,
+      connectorsApiBaseUrl: runtimeConfig.connectorsApiBaseUrl,
+      isConfigValid: runtimeConfig.isValid,
+      configErrors: runtimeConfig.errors,
+      configWarnings: runtimeConfig.warnings,
+    },
+  };
+}
 
 /**
  * Initial demo state.
  * Sets up the starting point for the mock UX demo.
  */
-const initialState: DemoState = {
-  user: null,
-  tenant: null,
-  providers: [],
-  connections: [],
-  signals: [],
-  groundedSignals: [],
-
-  // Entity collections
-  syncJobs: [],
-  webhooks: [],
-  tokens: [],
-  rateLimits: [],
-
-  // Enhanced authentication collections
-  authSessions: [],
-  authTokens: [],
-  providerAuths: [],
-  authEvents: [],
-  authConfig: MOCK_AUTH_CONFIG,
-
-  loading: {
-    connections: false,
-    signals: false,
-    grounding: false,
-    syncJobs: false,
-    webhooks: false,
-    tokens: false,
-    rateLimits: false,
-    authSessions: false,
-    authTokens: false,
-    providerAuths: false,
-    authEvents: false,
-  },
-  errors: {
-    connections: undefined,
-    signals: undefined,
-    grounding: undefined,
-    syncJobs: undefined,
-    webhooks: undefined,
-    tokens: undefined,
-    rateLimits: undefined,
-    authSessions: undefined,
-    authTokens: undefined,
-    providerAuths: undefined,
-    authEvents: undefined,
-  },
-
-  // Demo configuration
-  config: {
-    signalFrequency: 'medium',
-    errorRate: '10%',
-    timingMode: 'realistic',
-    providerComplexity: 'detailed',
-  },
-};
+const initialState = createInitialState();
 
 /**
  * Demo state reducer.

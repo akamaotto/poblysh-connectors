@@ -36,6 +36,10 @@ const PRESETS: Record<
       errorRate: "0%",
       timingMode: "fast",
       providerComplexity: "simple",
+      mode: "mock",
+      isConfigValid: true,
+      configErrors: [],
+      configWarnings: [],
     },
   },
   realistic: {
@@ -47,6 +51,10 @@ const PRESETS: Record<
       errorRate: "10%",
       timingMode: "realistic",
       providerComplexity: "detailed",
+      mode: "mock",
+      isConfigValid: true,
+      configErrors: [],
+      configWarnings: [],
     },
   },
   errors: {
@@ -58,6 +66,10 @@ const PRESETS: Record<
       errorRate: "20%",
       timingMode: "realistic",
       providerComplexity: "detailed",
+      mode: "mock",
+      isConfigValid: true,
+      configErrors: [],
+      configWarnings: [],
     },
   },
   performance: {
@@ -69,6 +81,10 @@ const PRESETS: Record<
       errorRate: "10%",
       timingMode: "fast",
       providerComplexity: "detailed",
+      mode: "mock",
+      isConfigValid: true,
+      configErrors: [],
+      configWarnings: [],
     },
   },
 };
@@ -160,6 +176,10 @@ export default function DemoConfiguration({
       errorRate: "10%",
       timingMode: "realistic",
       providerComplexity: "detailed",
+      mode: "mock",
+      isConfigValid: true,
+      configErrors: [],
+      configWarnings: [],
     };
     setActivePreset(inferPresetKey(defaults));
     setLocalConfig(defaults);
@@ -426,7 +446,11 @@ function isValidConfig(value: unknown): value is DemoConfig {
   const errOk = ["0%", "10%", "20%"].includes(cfg.errorRate);
   const timingOk = ["fast", "realistic"].includes(cfg.timingMode);
   const complexityOk = ["simple", "detailed"].includes(cfg.providerComplexity);
-  return freqOk && errOk && timingOk && complexityOk;
+  const modeOk = ["mock", "real"].includes(cfg.mode);
+  const validOk = typeof cfg.isConfigValid === "boolean";
+  const errorsOk = Array.isArray(cfg.configErrors);
+  const warningsOk = Array.isArray(cfg.configWarnings);
+  return freqOk && errOk && timingOk && complexityOk && modeOk && validOk && errorsOk && warningsOk;
 }
 
 /**

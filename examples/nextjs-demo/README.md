@@ -1,10 +1,15 @@
 # Poblysh Connectors Demo (Next.js)
 
-**⚠️ MOCK DEMO ONLY** - This is a demonstration sandbox that shows how the Poblysh Connectors integration works. No real API calls or authentication occur.
+**🎭 DUAL MODE DEMO** - This demo supports both mock data (Mode A) and real API integration (Mode B) for testing with actual Connectors services.
 
 ## Overview
 
-This demo showcases the complete end-to-end flow of integrating with Poblysh Connectors:
+This demo showcases the complete end-to-end flow of integrating with Poblysh Connectors with **dual mode support**:
+
+- **Mode A (Mock)**: Uses locally generated mock data, no API calls required
+- **Mode B (Real)**: Connects to actual Connectors API service
+
+The demo flow includes:
 
 1. **User Authentication** (mock)
 2. **Tenant Creation & Mapping** 
@@ -32,35 +37,56 @@ This demo showcases the complete end-to-end flow of integrating with Poblysh Con
 ### Prerequisites
 
 - Node.js 18+ 
-- npm, yarn, pnpm, or bun
+- Bun (recommended) or npm/yarn/pnpm
 
 ### Installation
 
 ```bash
-# Install dependencies
+# Install dependencies (Bun recommended)
+bun install
+# or
 npm install
 # or
 yarn install
 # or
 pnpm install
-# or
-bun install
 ```
 
-### Running the Demo
+### Configuration
 
+The demo supports two modes via environment variables:
+
+#### Mode A: Mock Mode (Default)
 ```bash
+# Copy the mock example configuration
+cp .env.example.mock .env.local
+
 # Start development server
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to start the demo.
+#### Mode B: Real API Mode
+```bash
+# Copy the real mode example configuration
+cp .env.example.real .env.local
+
+# Edit .env.local with your actual API endpoint
+# CONNECTORS_API_BASE_URL=https://your-connectors-api.example.com
+
+# Start development server
+bun dev
+```
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NEXT_PUBLIC_DEMO_MODE` | No | `mock` | Demo mode: `mock` or `real` |
+| `CONNECTORS_API_BASE_URL` | Only for real mode | - | HTTPS URL to your Connectors API service |
+| `CONNECTORS_API_TOKEN` | Optional | - | API authentication token (if required) |
+| `CONNECTORS_TENANT_ID` | Optional | - | Tenant ID for multi-tenant deployments |
+
+Open [http://localhost:3000](http://localhost:3000) to start the demo. The current mode and configuration status will be displayed at the top of the page.
 
 ### Demo Flow
 
@@ -93,10 +119,12 @@ components/
 └── ui/                    # shadcn/ui components
 
 lib/demo/
-├── types.ts               # Mock domain types
-├── state.ts               # React Context + hooks
+├── types.ts               # Demo domain types + mode configuration
+├── state.ts               # React Context + hooks + runtime config
 ├── mockData.ts            # Deterministic generators
-└── constants.ts           # Mock configuration
+├── constants.ts           # Mock configuration
+├── demoConfig.ts          # Environment variable validation
+└── apiRouter.ts           # API abstraction layer (mock/real)
 ```
 
 ## Related Documentation
@@ -106,9 +134,45 @@ lib/demo/
 - **OpenSpec Changes** - `openspec/changes/`
 - **Planning Docs** - `plan/nextjs-demo/`
 
-## Mode A vs Mode B
+## Mode Configuration
 
-This is **Mode A** (Mock UX Only). It demonstrates concepts without real integration. **Mode B** (Real Integration) would connect to actual Connectors APIs and require real credentials.
+### Mode A: Mock Mode (Default)
+- ✅ No external dependencies
+- ✅ Works offline
+- ✅ Instant setup
+- 📊 Uses deterministic mock data
+- 🎭 Educational annotations throughout
+
+### Mode B: Real API Mode
+- 🌐 Connects to actual Connectors API
+- 🔧 Requires API endpoint configuration
+- 📡 Makes real HTTP requests
+- 🔐 Uses real authentication (if configured)
+- 📈 Shows real data and performance
+
+### Mode Indicator
+
+The demo displays a mode indicator at the top of the page showing:
+- Current mode (Mock/Real)
+- Configuration status (✅ Valid/⚠️ Issues)
+- API endpoint (in real mode)
+- Any warnings or errors
+
+### Switching Between Modes
+
+Simply update the `NEXT_PUBLIC_DEMO_MODE` environment variable and restart the development server:
+
+```bash
+# Switch to mock mode
+echo "NEXT_PUBLIC_DEMO_MODE=mock" > .env.local
+
+# Switch to real mode
+echo "NEXT_PUBLIC_DEMO_MODE=real" > .env.local
+echo "CONNECTORS_API_BASE_URL=https://your-api.example.com" >> .env.local
+
+# Restart server
+bun dev
+```
 
 ## Development
 

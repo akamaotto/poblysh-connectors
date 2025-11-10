@@ -14,6 +14,7 @@ import {
   DemoWebhook,
   DemoToken,
   DemoRateLimit,
+  DemoProvider,
 } from "./types";
 import {
   generateId,
@@ -89,6 +90,115 @@ function createRandomForConnection(connection: DemoConnection): SeededRandom {
   return new SeededRandom(
     `${connection.tenantId}-${connection.providerSlug}-${connection.id}`,
   );
+}
+
+/**
+ * Generates mock providers for the demo.
+ * Returns a deterministic set of providers representing common integrations.
+ */
+export function generateMockProviders(): DemoProvider[] {
+  return [
+    {
+      slug: 'github',
+      name: 'GitHub',
+      description: 'Git repository hosting and collaboration platform',
+      iconUrl: 'https://github.com/favicon.ico',
+      supportedSignalKinds: ['code.push', 'code.pull_request', 'code.issue', 'code.release'],
+      authType: 'oauth2',
+      rateLimit: {
+        requestsPerHour: 5000,
+        requestsPerMinute: 60,
+      },
+      webhookEvents: ['push', 'pull_request', 'issues', 'release'],
+      defaultScopes: ['repo', 'read:user', 'user:email'],
+      features: {
+        realtimeWebhooks: true,
+        historicalSync: true,
+        incrementalSync: true,
+        crossProviderCorrelation: false,
+      },
+    },
+    {
+      slug: 'slack',
+      name: 'Slack',
+      description: 'Team communication and collaboration platform',
+      iconUrl: 'https://slack.com/favicon.ico',
+      supportedSignalKinds: ['message.post', 'message.reaction', 'channel.updated', 'user.updated'],
+      authType: 'oauth2',
+      rateLimit: {
+        requestsPerHour: 10000,
+        requestsPerMinute: 100,
+      },
+      webhookEvents: ['message', 'reaction_added', 'channel_created', 'team_join'],
+      defaultScopes: ['channels:read', 'chat:read', 'users:read'],
+      features: {
+        realtimeWebhooks: true,
+        historicalSync: true,
+        incrementalSync: true,
+        crossProviderCorrelation: false,
+      },
+    },
+    {
+      slug: 'jira',
+      name: 'Jira',
+      description: 'Issue tracking and project management platform',
+      iconUrl: 'https://atlassian.com/favicon.ico',
+      supportedSignalKinds: ['issue.created', 'issue.updated', 'issue.transitioned', 'sprint.updated'],
+      authType: 'api_key',
+      rateLimit: {
+        requestsPerHour: 1000,
+        requestsPerMinute: 30,
+      },
+      webhookEvents: ['jira:issue_created', 'jira:issue_updated', 'sprint_started', 'sprint_closed'],
+      defaultScopes: [],
+      features: {
+        realtimeWebhooks: true,
+        historicalSync: true,
+        incrementalSync: true,
+        crossProviderCorrelation: true,
+      },
+    },
+    {
+      slug: 'google-workspace',
+      name: 'Google Workspace',
+      description: 'Productivity and collaboration suite',
+      iconUrl: 'https://google.com/favicon.ico',
+      supportedSignalKinds: ['document.created', 'document.updated', 'email.received', 'calendar.created'],
+      authType: 'oauth2',
+      rateLimit: {
+        requestsPerHour: 10000,
+        requestsPerMinute: 100,
+      },
+      webhookEvents: ['document_created', 'document_updated', 'message_received', 'event_created'],
+      defaultScopes: ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar.readonly'],
+      features: {
+        realtimeWebhooks: true,
+        historicalSync: true,
+        incrementalSync: true,
+        crossProviderCorrelation: true,
+      },
+    },
+    {
+      slug: 'zoho',
+      name: 'Zoho CRM',
+      description: 'Customer relationship management platform',
+      iconUrl: 'https://zoho.com/favicon.ico',
+      supportedSignalKinds: ['contact.created', 'contact.updated', 'deal.created', 'deal.updated'],
+      authType: 'hybrid',
+      rateLimit: {
+        requestsPerHour: 5000,
+        requestsPerMinute: 50,
+      },
+      webhookEvents: ['Contacts.create', 'Contacts.edit', 'Deals.create', 'Deals.edit'],
+      defaultScopes: ['ZohoCRM.contacts.read', 'ZohoCRM.deals.read'],
+      features: {
+        realtimeWebhooks: true,
+        historicalSync: true,
+        incrementalSync: true,
+        crossProviderCorrelation: false,
+      },
+    },
+  ];
 }
 
 /**
