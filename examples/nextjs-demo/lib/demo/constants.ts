@@ -87,27 +87,32 @@ export const MOCK_USERS = [
   {
     email: 'alice@demo.com',
     name: 'Alice Johnson',
-    avatar: '/avatars/alice.jpg',
+    avatarUrl: '/avatars/alice.jpg',
+    roles: ['admin'],
   },
   {
     email: 'bob@demo.com',
     name: 'Bob Smith',
-    avatar: '/avatars/bob.jpg',
+    avatarUrl: '/avatars/bob.jpg',
+    roles: ['member'],
   },
   {
     email: 'carol@demo.com',
     name: 'Carol Davis',
-    avatar: '/avatars/carol.jpg',
+    avatarUrl: '/avatars/carol.jpg',
+    roles: ['admin', 'member'],
   },
   {
     email: 'david@demo.com',
     name: 'David Wilson',
-    avatar: '/avatars/david.jpg',
+    avatarUrl: '/avatars/david.jpg',
+    roles: ['member'],
   },
   {
     email: 'eve@demo.com',
     name: 'Eve Martinez',
-    avatar: '/avatars/eve.jpg',
+    avatarUrl: '/avatars/eve.jpg',
+    roles: ['member'],
   },
 ] as const;
 

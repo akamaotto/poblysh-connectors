@@ -94,7 +94,7 @@ function createRandomForConnection(connection: DemoConnection): SeededRandom {
 /**
  * Generates a mock user from an email address.
  */
-export function generateMockUser(email: string): DemoUser {
+export function generateMockUser(email: string, tenantId?: string): DemoUser {
   const mockUser = MOCK_USERS.find((u) => u.email === email);
 
   if (mockUser) {
@@ -102,6 +102,9 @@ export function generateMockUser(email: string): DemoUser {
       id: generateId(email),
       email: mockUser.email,
       name: mockUser.name,
+      avatarUrl: mockUser.avatarUrl,
+      roles: [...(mockUser.roles || ['member'])],
+      tenantId: tenantId || generateId('default-tenant'),
     };
   }
 
@@ -115,6 +118,9 @@ export function generateMockUser(email: string): DemoUser {
     id: generateId(email),
     email,
     name,
+    avatarUrl: `https://avatar.vercel.sh/${encodeURIComponent(email)}`,
+    roles: ['member'],
+    tenantId: tenantId || generateId('default-tenant'),
   };
 }
 
@@ -127,10 +133,12 @@ export function generateMockTenant(organizationName: string): DemoTenant {
   return {
     id: tenantId,
     name: organizationName,
+    slug: organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
     connectorsTenantId,
     createdAt: new Date(
       Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000,
     ).toISOString(),
+    plan: Math.random() > 0.7 ? 'pro' : Math.random() > 0.5 ? 'enterprise' : 'free',
   };
 }
 

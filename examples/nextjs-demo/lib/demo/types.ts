@@ -7,7 +7,7 @@
  */
 
 /**
- * Mock user representation.
+ * Enhanced user representation with additional authentication properties.
  * In production, this would come from real authentication.
  */
 export interface DemoUser {
@@ -17,10 +17,16 @@ export interface DemoUser {
   email: string;
   /** User display name (generated from email) */
   name: string;
+  /** Optional user avatar URL */
+  avatarUrl?: string;
+  /** User roles within the tenant */
+  roles: string[];
+  /** Tenant ID this user belongs to */
+  tenantId: string;
 }
 
 /**
- * Mock tenant representation.
+ * Enhanced tenant representation with additional authentication context.
  * Shows the mapping between Poblysh Core tenant and Connectors service tenant.
  */
 export interface DemoTenant {
@@ -28,10 +34,14 @@ export interface DemoTenant {
   id: string;
   /** Tenant display name */
   name: string;
+  /** Tenant slug for URLs */
+  slug: string;
   /** Connectors service tenant ID (used in X-Tenant-Id header) */
   connectorsTenantId: string;
   /** Tenant creation timestamp */
   createdAt: string;
+  /** Tenant plan tier */
+  plan: 'free' | 'pro' | 'enterprise';
 }
 
 /**
@@ -382,6 +392,188 @@ export interface DemoConfig {
   providerComplexity: 'simple' | 'detailed';
 }
 
+// ============================================================================
+// ENHANCED AUTHENTICATION DOMAIN MODELS
+// ============================================================================
+
+/**
+ * Mock JWT-style token for educational purposes.
+ * Represents a JWT token with visible structure for learning.
+ *
+ * IMPORTANT: This is NOT a real JWT and has NO cryptographic security.
+ * The signature is a mock string for demonstration only.
+ */
+export interface DemoAuthToken {
+  /** Token identifier */
+  id: string;
+  /** Token type */
+  type: 'access' | 'refresh' | 'id';
+  /** Provider ID this token is for (null for core auth) */
+  providerId?: string;
+  /** JWT header (mock) */
+  header: {
+    alg: string; // Algorithm (e.g., "HS256" - MOCK)
+    typ: 'JWT'; // Token type
+  };
+  /** JWT payload (mock) */
+  payload: {
+    sub: string; // User ID
+    email?: string; // User email
+    tenantId: string; // Tenant ID
+    sessionId: string; // Session identifier
+    scopes: string[]; // Auth scopes
+    iat: number; // Issued at timestamp
+    exp: number; // Expires at timestamp
+    providerId?: string; // Provider ID (for provider tokens)
+    tokenUse?: string; // Token use (e.g., "id", "access")
+    meta?: Record<string, unknown>; // Additional metadata
+  };
+  /** Mock signature (NOT cryptographically valid) */
+  signature: string;
+}
+
+/**
+ * Authentication session representing a user's login state.
+ * Manages the core session lifecycle for the demo.
+ */
+export interface DemoAuthSession {
+  /** Session identifier */
+  id: string;
+  /** User ID this session belongs to */
+  userId: string;
+  /** Tenant ID this session is scoped to */
+  tenantId: string;
+  /** Current session status */
+  status: 'active' | 'expired' | 'revoked';
+  /** Session creation timestamp */
+  createdAt: number;
+  /** Session last updated timestamp */
+  updatedAt: number;
+  /** Session expiration timestamp */
+  expiresAt: number;
+  /** Primary access token ID */
+  primaryTokenId: string;
+  /** Refresh token ID (if available) */
+  refreshTokenId?: string;
+  /** Associated provider authentication IDs */
+  providerAuthIds: string[];
+  /** Last activity timestamp */
+  lastActivityAt?: number;
+  /** Additional session metadata */
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Provider-specific authentication state.
+ * Represents the OAuth connection between tenant and provider.
+ */
+export interface DemoProviderAuth {
+  /** Provider authentication identifier */
+  id: string;
+  /** Provider being authenticated */
+  providerId: string;
+  /** Session ID this auth belongs to */
+  sessionId: string;
+  /** Granted OAuth scopes */
+  scopes: string[];
+  /** Current authentication status */
+  status: 'connected' | 'expired' | 'revoked' | 'error';
+  /** Access token ID */
+  accessTokenId?: string;
+  /** Refresh token ID */
+  refreshTokenId?: string;
+  /** Authentication creation timestamp */
+  createdAt: number;
+  /** Authentication last updated timestamp */
+  updatedAt: number;
+  /** Additional provider metadata */
+  meta?: {
+    displayName?: string;
+    accountId?: string;
+    accountName?: string;
+    orgName?: string;
+    avatarUrl?: string;
+  };
+}
+
+/**
+ * Authentication event for security monitoring and educational insights.
+ * Tracks all authentication-related activities in the demo.
+ */
+export interface DemoAuthEvent {
+  /** Event identifier */
+  id: string;
+  /** Session ID this event relates to */
+  sessionId?: string;
+  /** User ID this event relates to */
+  userId?: string;
+  /** Tenant ID this event relates to */
+  tenantId?: string;
+  /** Provider ID this event relates to */
+  providerId?: string;
+  /** Event type */
+  type:
+    | 'LOGIN_SUCCESS'
+    | 'LOGIN_FAILURE'
+    | 'LOGOUT'
+    | 'TOKEN_ISSUED'
+    | 'TOKEN_REFRESHED'
+    | 'TOKEN_REFRESH_FAILED'
+    | 'TOKEN_REVOKED'
+    | 'PROVIDER_CONNECTED'
+    | 'PROVIDER_DISCONNECTED'
+    | 'SECURITY_WARNING'
+    | 'SCOPE_CHANGED'
+    | 'SESSION_EXPIRED';
+  /** Event severity level */
+  severity: 'info' | 'warning' | 'error' | 'debug';
+  /** Event timestamp */
+  timestamp: number;
+  /** Additional event details */
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Authentication error scenario configuration.
+ * Defines mock error scenarios for educational purposes.
+ */
+export interface DemoAuthErrorScenario {
+  /** Error scenario identifier */
+  id: string;
+  /** Error scenario name */
+  name: string;
+  /** Error scenario description */
+  description: string;
+  /** Error type to simulate */
+  errorType: 'network_timeout' | 'token_refresh_failed' | 'permission_denied' | 'rate_limit' | 'invalid_credentials';
+  /** Probability of occurrence (0-1) */
+  probability: number;
+  /** Error message template */
+  messageTemplate: string;
+  /** Recovery steps suggestion */
+  recoverySteps: string[];
+}
+
+/**
+ * Authentication configuration constants.
+ */
+export interface DemoAuthConfig {
+  /** Default token TTL in milliseconds */
+  DEFAULT_TOKEN_TTL_MS: number;
+  /** Default refresh token TTL in milliseconds */
+  DEFAULT_REFRESH_TOKEN_TTL_MS: number;
+  /** Token refresh threshold (milliseconds before expiry) */
+  TOKEN_REFRESH_THRESHOLD_MS: number;
+  /** Session TTL in milliseconds */
+  SESSION_TTL_MS: number;
+  /** Cross-tab sync enabled */
+  CROSS_TAB_SYNC_ENABLED: boolean;
+  /** Mock authentication error scenarios enabled */
+  ERROR_SCENARIOS_ENABLED: boolean;
+  /** Educational annotations enabled */
+  EDUCATION_MODE_ENABLED: boolean;
+}
+
 /**
  * Demo state context interface.
  * Defines the shape of the global demo state.
@@ -400,7 +592,7 @@ export interface DemoState {
   /** Grounded signals */
   groundedSignals: DemoGroundedSignal[];
 
-  // New entity collections
+  // Entity collections
   /** Sync jobs for connections */
   syncJobs: DemoSyncJob[];
   /** Webhook events received */
@@ -409,6 +601,18 @@ export interface DemoState {
   tokens: DemoToken[];
   /** Rate limiting status */
   rateLimits: DemoRateLimit[];
+
+  // Enhanced authentication collections
+  /** Authentication sessions */
+  authSessions: DemoAuthSession[];
+  /** JWT-style tokens */
+  authTokens: DemoAuthToken[];
+  /** Provider-specific authentication states */
+  providerAuths: DemoProviderAuth[];
+  /** Authentication events for monitoring */
+  authEvents: DemoAuthEvent[];
+  /** Authentication configuration */
+  authConfig: DemoAuthConfig;
 
   /** Loading states */
   loading: {
@@ -426,6 +630,14 @@ export interface DemoState {
     tokens: boolean;
     /** Rate limit loading */
     rateLimits: boolean;
+    /** Authentication session loading */
+    authSessions: boolean;
+    /** Authentication token loading */
+    authTokens: boolean;
+    /** Provider authentication loading */
+    providerAuths: boolean;
+    /** Authentication events loading */
+    authEvents: boolean;
   };
   /** Error states */
   errors: {
@@ -443,6 +655,14 @@ export interface DemoState {
     tokens?: string;
     /** Rate limit errors */
     rateLimits?: string;
+    /** Authentication session errors */
+    authSessions?: string;
+    /** Authentication token errors */
+    authTokens?: string;
+    /** Provider authentication errors */
+    providerAuths?: string;
+    /** Authentication event errors */
+    authEvents?: string;
   };
 
   /** Demo configuration */
@@ -465,7 +685,7 @@ export type DemoAction =
   | { type: 'SET_GROUNDED_SIGNALS'; payload: DemoGroundedSignal[] }
   | { type: 'ADD_GROUNDED_SIGNAL'; payload: DemoGroundedSignal }
 
-  // New entity actions
+  // Entity actions
   | { type: 'SET_SYNC_JOBS'; payload: DemoSyncJob[] }
   | { type: 'ADD_SYNC_JOB'; payload: DemoSyncJob }
   | { type: 'UPDATE_SYNC_JOB'; payload: { id: string; updates: Partial<DemoSyncJob> } }
@@ -477,6 +697,20 @@ export type DemoAction =
   | { type: 'UPDATE_TOKEN'; payload: { id: string; updates: Partial<DemoToken> } }
   | { type: 'SET_RATE_LIMITS'; payload: DemoRateLimit[] }
   | { type: 'UPDATE_RATE_LIMIT'; payload: { id: string; updates: Partial<DemoRateLimit> } }
+
+  // Enhanced authentication actions
+  | { type: 'SET_AUTH_SESSIONS'; payload: DemoAuthSession[] }
+  | { type: 'ADD_AUTH_SESSION'; payload: DemoAuthSession }
+  | { type: 'UPDATE_AUTH_SESSION'; payload: { id: string; updates: Partial<DemoAuthSession> } }
+  | { type: 'SET_AUTH_TOKENS'; payload: DemoAuthToken[] }
+  | { type: 'ADD_AUTH_TOKEN'; payload: DemoAuthToken }
+  | { type: 'UPDATE_AUTH_TOKEN'; payload: { id: string; updates: Partial<DemoAuthToken> } }
+  | { type: 'SET_PROVIDER_AUTHS'; payload: DemoProviderAuth[] }
+  | { type: 'ADD_PROVIDER_AUTH'; payload: DemoProviderAuth }
+  | { type: 'UPDATE_PROVIDER_AUTH'; payload: { id: string; updates: Partial<DemoProviderAuth> } }
+  | { type: 'SET_AUTH_EVENTS'; payload: DemoAuthEvent[] }
+  | { type: 'ADD_AUTH_EVENT'; payload: DemoAuthEvent }
+  | { type: 'SET_AUTH_CONFIG'; payload: DemoAuthConfig }
 
   // Configuration actions
   | { type: 'SET_CONFIG'; payload: DemoConfig }

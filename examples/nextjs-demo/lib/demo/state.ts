@@ -13,8 +13,14 @@ import {
   DemoSyncJob,
   DemoWebhook,
   DemoToken,
-  DemoRateLimit
+  DemoRateLimit,
+  DemoAuthSession,
+  DemoAuthToken,
+  DemoProviderAuth,
+  DemoAuthEvent,
+  DemoAuthConfig
 } from './types';
+import { MOCK_AUTH_CONFIG } from './mockAuth';
 
 /**
  * Initial demo state.
@@ -28,11 +34,18 @@ const initialState: DemoState = {
   signals: [],
   groundedSignals: [],
 
-  // New entity collections
+  // Entity collections
   syncJobs: [],
   webhooks: [],
   tokens: [],
   rateLimits: [],
+
+  // Enhanced authentication collections
+  authSessions: [],
+  authTokens: [],
+  providerAuths: [],
+  authEvents: [],
+  authConfig: MOCK_AUTH_CONFIG,
 
   loading: {
     connections: false,
@@ -42,6 +55,10 @@ const initialState: DemoState = {
     webhooks: false,
     tokens: false,
     rateLimits: false,
+    authSessions: false,
+    authTokens: false,
+    providerAuths: false,
+    authEvents: false,
   },
   errors: {
     connections: undefined,
@@ -51,6 +68,10 @@ const initialState: DemoState = {
     webhooks: undefined,
     tokens: undefined,
     rateLimits: undefined,
+    authSessions: undefined,
+    authTokens: undefined,
+    providerAuths: undefined,
+    authEvents: undefined,
   },
 
   // Demo configuration
@@ -213,6 +234,91 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
             ? { ...rateLimit, ...action.payload.updates }
             : rateLimit
         ),
+      };
+
+    // Enhanced authentication actions
+    case 'SET_AUTH_SESSIONS':
+      return {
+        ...state,
+        authSessions: action.payload,
+      };
+
+    case 'ADD_AUTH_SESSION':
+      return {
+        ...state,
+        authSessions: [...state.authSessions, action.payload],
+      };
+
+    case 'UPDATE_AUTH_SESSION':
+      return {
+        ...state,
+        authSessions: state.authSessions.map(session =>
+          session.id === action.payload.id
+            ? { ...session, ...action.payload.updates }
+            : session
+        ),
+      };
+
+    case 'SET_AUTH_TOKENS':
+      return {
+        ...state,
+        authTokens: action.payload,
+      };
+
+    case 'ADD_AUTH_TOKEN':
+      return {
+        ...state,
+        authTokens: [...state.authTokens, action.payload],
+      };
+
+    case 'UPDATE_AUTH_TOKEN':
+      return {
+        ...state,
+        authTokens: state.authTokens.map(token =>
+          token.id === action.payload.id
+            ? { ...token, ...action.payload.updates }
+            : token
+        ),
+      };
+
+    case 'SET_PROVIDER_AUTHS':
+      return {
+        ...state,
+        providerAuths: action.payload,
+      };
+
+    case 'ADD_PROVIDER_AUTH':
+      return {
+        ...state,
+        providerAuths: [...state.providerAuths, action.payload],
+      };
+
+    case 'UPDATE_PROVIDER_AUTH':
+      return {
+        ...state,
+        providerAuths: state.providerAuths.map(auth =>
+          auth.id === action.payload.id
+            ? { ...auth, ...action.payload.updates }
+            : auth
+        ),
+      };
+
+    case 'SET_AUTH_EVENTS':
+      return {
+        ...state,
+        authEvents: action.payload,
+      };
+
+    case 'ADD_AUTH_EVENT':
+      return {
+        ...state,
+        authEvents: [action.payload, ...state.authEvents],
+      };
+
+    case 'SET_AUTH_CONFIG':
+      return {
+        ...state,
+        authConfig: action.payload,
       };
 
     // Configuration actions
@@ -391,6 +497,74 @@ export function useDemoTokens(): DemoToken[] {
 export function useDemoRateLimits(): DemoRateLimit[] {
   const { state } = useDemoContext();
   return state.rateLimits;
+}
+
+// Enhanced authentication hooks
+
+/**
+ * Hook to access authentication sessions.
+ */
+export function useDemoAuthSessions(): DemoAuthSession[] {
+  const { state } = useDemoContext();
+  return state.authSessions;
+}
+
+/**
+ * Hook to access the current active authentication session.
+ */
+export function useDemoCurrentAuthSession(): DemoAuthSession | null {
+  const { state } = useDemoContext();
+  // Initialize with a timestamp from a safe place
+  const [currentTime, setCurrentTime] = React.useState(() => Date.now());
+  
+  // Update current time periodically to check session expiry
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // Update every minute
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Use useMemo to avoid recalculating on every render
+  return React.useMemo(() => {
+    return state.authSessions.find(session =>
+      session.status === 'active' &&
+      session.expiresAt > currentTime
+    ) || null;
+  }, [state.authSessions, currentTime]);
+}
+
+/**
+ * Hook to access authentication tokens.
+ */
+export function useDemoAuthTokens(): DemoAuthToken[] {
+  const { state } = useDemoContext();
+  return state.authTokens;
+}
+
+/**
+ * Hook to access provider authentications.
+ */
+export function useDemoProviderAuths(): DemoProviderAuth[] {
+  const { state } = useDemoContext();
+  return state.providerAuths;
+}
+
+/**
+ * Hook to access authentication events.
+ */
+export function useDemoAuthEvents(): DemoAuthEvent[] {
+  const { state } = useDemoContext();
+  return state.authEvents;
+}
+
+/**
+ * Hook to access authentication configuration.
+ */
+export function useDemoAuthConfig(): DemoAuthConfig {
+  const { state } = useDemoContext();
+  return state.authConfig;
 }
 
 /**
@@ -590,6 +764,104 @@ export const setRateLimits = (rateLimits: DemoRateLimit[]): DemoAction => ({
 export const updateRateLimit = (id: string, updates: Partial<DemoRateLimit>): DemoAction => ({
   type: 'UPDATE_RATE_LIMIT',
   payload: { id, updates },
+});
+
+// Enhanced authentication action creators
+
+/**
+ * Sets the authentication sessions list.
+ */
+export const setAuthSessions = (authSessions: DemoAuthSession[]): DemoAction => ({
+  type: 'SET_AUTH_SESSIONS',
+  payload: authSessions,
+});
+
+/**
+ * Adds a new authentication session.
+ */
+export const addAuthSession = (authSession: DemoAuthSession): DemoAction => ({
+  type: 'ADD_AUTH_SESSION',
+  payload: authSession,
+});
+
+/**
+ * Updates an existing authentication session.
+ */
+export const updateAuthSession = (id: string, updates: Partial<DemoAuthSession>): DemoAction => ({
+  type: 'UPDATE_AUTH_SESSION',
+  payload: { id, updates },
+});
+
+/**
+ * Sets the authentication tokens list.
+ */
+export const setAuthTokens = (authTokens: DemoAuthToken[]): DemoAction => ({
+  type: 'SET_AUTH_TOKENS',
+  payload: authTokens,
+});
+
+/**
+ * Adds a new authentication token.
+ */
+export const addAuthToken = (authToken: DemoAuthToken): DemoAction => ({
+  type: 'ADD_AUTH_TOKEN',
+  payload: authToken,
+});
+
+/**
+ * Updates an existing authentication token.
+ */
+export const updateAuthToken = (id: string, updates: Partial<DemoAuthToken>): DemoAction => ({
+  type: 'UPDATE_AUTH_TOKEN',
+  payload: { id, updates },
+});
+
+/**
+ * Sets the provider authentications list.
+ */
+export const setProviderAuths = (providerAuths: DemoProviderAuth[]): DemoAction => ({
+  type: 'SET_PROVIDER_AUTHS',
+  payload: providerAuths,
+});
+
+/**
+ * Adds a new provider authentication.
+ */
+export const addProviderAuth = (providerAuth: DemoProviderAuth): DemoAction => ({
+  type: 'ADD_PROVIDER_AUTH',
+  payload: providerAuth,
+});
+
+/**
+ * Updates an existing provider authentication.
+ */
+export const updateProviderAuth = (id: string, updates: Partial<DemoProviderAuth>): DemoAction => ({
+  type: 'UPDATE_PROVIDER_AUTH',
+  payload: { id, updates },
+});
+
+/**
+ * Sets the authentication events list.
+ */
+export const setAuthEvents = (authEvents: DemoAuthEvent[]): DemoAction => ({
+  type: 'SET_AUTH_EVENTS',
+  payload: authEvents,
+});
+
+/**
+ * Adds a new authentication event.
+ */
+export const addAuthEvent = (authEvent: DemoAuthEvent): DemoAction => ({
+  type: 'ADD_AUTH_EVENT',
+  payload: authEvent,
+});
+
+/**
+ * Sets the authentication configuration.
+ */
+export const setAuthConfig = (authConfig: DemoAuthConfig): DemoAction => ({
+  type: 'SET_AUTH_CONFIG',
+  payload: authConfig,
 });
 
 /**
