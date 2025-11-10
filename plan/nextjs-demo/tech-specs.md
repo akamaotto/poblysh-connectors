@@ -73,7 +73,7 @@ Any real integration behavior belongs to a future Mode B spec.
 
 ### 3.1 Application Type
 
-- Next.js 13+ App Router application.
+- Next.js App Router application (target latest stable Next.js, e.g. 16+).
 - Deployed as a standalone example within the monorepo under `examples/nextjs-demo`.
 - All logic is self-contained and does not modify or depend on server-side Rust components.
 
@@ -82,7 +82,7 @@ Any real integration behavior belongs to a future Mode B spec.
 - UI Layer:
   - React Server Components (RSC) for layout and static scaffolding.
   - Client Components for interactive flows and mock state.
-  - Tailwind + shadcn for styling and consistent components.
+  - Tailwind + shadcn/ui for styling and consistent components (via official shadcn MCP).
 
 - State & Domain Layer:
   - Pure TypeScript modules under `lib/demo/`.
@@ -349,19 +349,22 @@ These types are intentionally close to real concepts but MUST NOT be considered 
 ## 8. UI & UX Guidelines
 
 - Use Tailwind and shadcn/ui:
-  - For consistency and to mirror poblysh.com design direction.
+  - For monochrome, minimalist components.
+  - Base on official shadcn primitives (installed/managed via shadcn MCP).
+- Use native Next.js components:
+  - App Router, `Link`, route handlers aligned with latest stable Next.js API.
 - Keep components:
   - Small, composable, and well-named.
+  - Prefer black/white/gray; only use:
+    - Red for errors.
+    - Green for final step success badges.
 - Provide inline hints:
-  - Each major step/page should have a short explanation box:
-    - Mapping what is happening to real Poblysh + Connectors behavior.
+  - Short and optional; verbose explanations should be in collapsible/secondary content.
 - Accessibility:
-  - Basic semantics:
-    - Proper headings.
-    - Labels on inputs and buttons.
+  - Proper headings and labels.
+  - Do not rely on color alone for meaning.
 - Branding:
-  - Include “Poblysh Connectors UX Demo” consistently.
-  - Include a clearly visible “Mock Environment”/“No real data” tag.
+  - Include “Poblysh Connectors UX Demo” and a clear “Mock-only / No real data” tag.
 
 ---
 
@@ -370,6 +373,7 @@ These types are intentionally close to real concepts but MUST NOT be considered 
 - Simplicity first:
   - No heavy state libraries for Mode A (React context + hooks is enough).
   - No complicated build pipeline changes.
+  - Use Bun to run all dev/build/test commands instead of npm or yarn.
 - Isolation:
   - Does not affect the Rust service runtime.
   - Does not require the Connectors API or database to be running.
@@ -394,6 +398,10 @@ Constraints:
   - Be opt-in.
   - Live behind clear configuration flags.
   - Not alter the guarantees of Mode A.
+- For both Mode A and any future Mode B:
+  - Use the configured web search MCP and Context7 MCP to pull up-to-date examples and documentation for:
+    - Latest stable Next.js features.
+    - shadcn/ui usage and primitives.
 
 Mode B details are intentionally excluded from this tech spec to keep Mode A focused, safe, and easy to understand.
 

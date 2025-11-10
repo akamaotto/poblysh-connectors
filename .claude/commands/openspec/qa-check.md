@@ -18,10 +18,53 @@ Perform reviews like a senior engineer who understands the entire codebase—not
 - **Learning Orientation**: Make reviews educational—explain *why* something is an issue, not just *what* is wrong.
 - **Reference Documentation**: Refer to `openspec/AGENTS.md` for OpenSpec conventions and clarifications.
 - **Axum Skill Pack**: If the change touches Axum 0.8 routing, middleware, or extractors, consult `.claude/skills/axum-0-8/SKILL.md` for framework patterns and pitfalls.
+- **UI QA Reviewer**: For UI-related changes, delegate to the `ui-qa-reviewer` agent (available at `.claude/agents/ui-qa-reviewer.md`) for specialized frontend quality assessment.
 
 ---
 
 ## Multi-Phase Review Process
+
+### Phase 0: UI Task Detection & Specialized Agent Delegation
+
+**Objective:** Identify UI-related tasks and delegate to the specialized UI QA reviewer agent when appropriate.
+
+#### 0.1 UI Task Detection
+- [ ] **Analyze Change Scope**: Check if the change involves:
+  - Frontend components (React, Vue, Angular, etc.)
+  - UI/UX interfaces and layouts
+  - Styling and responsive design
+  - User interaction flows
+  - Accessibility features
+  - Component libraries and design systems
+  - Files in `examples/nextjs-demo/` or similar frontend directories
+  - File extensions: `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.less`
+  - Keywords in proposal/tasks: "UI", "frontend", "interface", "component", "layout", "responsive", "accessibility"
+
+- [ ] **Check for UI-Specific Patterns**:
+  - Component creation or modification
+  - Design system implementation
+  - User interface improvements
+  - Responsive design changes
+  - Accessibility compliance work
+  - User experience enhancements
+
+#### 0.2 Agent Delegation Decision
+**If UI-related task detected:**
+- [ ] **Delegate to UI QA Reviewer**: Use the `ui-qa-reviewer` agent for comprehensive UI-specific analysis
+- [ ] **Provide Context**: Share change details, proposal, and relevant files with the UI QA reviewer
+- [ ] **Integrate Results**: Incorporate UI QA findings into the overall assessment
+- [ ] **Continue with Standard QA**: Proceed with remaining phases for non-UI aspects
+
+**If not UI-related:**
+- [ ] Continue with Phase 1 of standard QA workflow
+
+**UI QA Reviewer Integration:**
+```
+When UI task detected, invoke:
+- Agent: ui-qa-reviewer (available at .claude/agents/ui-qa-reviewer.md)
+- Scope: Responsive design, accessibility, component reuse, performance
+- Output: UI-specific quality assessment with actionable recommendations
+```
 
 ### Phase 1: Change Validation & Context Gathering
 
@@ -321,6 +364,16 @@ of SQL injection. Parameterized queries ensure the database treats input
 as data, not executable code, preventing injection attacks.
 ```
 
+#### UI/UX Quality Assessment (when applicable)
+- **Responsive Design**: Mobile-first approach, breakpoint behavior, layout consistency
+- **Accessibility Compliance**: ARIA labels, keyboard navigation, screen reader support
+- **Component Reuse Analysis**: Design system adherence, consolidation opportunities
+- **Performance Optimization**: Lazy loading, code splitting, render efficiency
+- **Cross-browser Compatibility**: Testing considerations and fallback strategies
+- **User Experience**: Interaction patterns, error states, loading states
+
+*This section is populated by the ui-qa-reviewer agent when UI-related tasks are detected.*
+
 #### Architecture & Design Observations
 - Document significant architectural patterns
 - Note areas of technical debt
@@ -359,6 +412,13 @@ Prioritized list of required changes:
 ```bash
 # Review change details
 openspec show <id>
+
+# UI-specific delegation (when UI task detected)
+# Use ui-qa-reviewer agent for comprehensive UI analysis:
+# - Responsive design review
+# - Accessibility compliance check
+# - Component reuse analysis
+# - Performance optimization assessment
 
 # Comprehensive compilation check
 cargo check --all-targets

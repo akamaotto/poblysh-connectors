@@ -39,6 +39,16 @@ When they refresh the page or navigate directly to a deep link
 Then the application should handle lost state gracefully
 And provide options to restart the demo flow
 
+#### Scenario: Root route session handling
+Given a user with an existing demo session visits the root route `/`
+When the application loads
+Then it should detect the existing session and redirect to the appropriate step:
+- If no tenant exists, redirect to `/tenant`
+- If tenant exists but no connections, redirect to `/integrations`
+- If connections exist but no signals, redirect to `/signals` with scan prompt
+- If signals exist, redirect to `/signals` to show the signal list
+And always provide an option to reset the demo flow
+
 ### Requirement: Tenant Creation and Mapping Visualization
 The system SHALL provide tenant creation functionality that demonstrates the mapping between Poblysh tenant IDs and Connectors tenant IDs.
 
@@ -52,7 +62,7 @@ And show how the mapping would work in production
 #### Scenario: Tenant mapping education
 Given a user views the tenant summary
 When they examine the UI
-Then they should see explanations of how `X-Tenant-Id` would be used in production
+Then they should see explanations of how `X-Tenant-Id: <connectorsTenantId>` would be used in production
 And understand the relationship between Poblysh Core and Connectors service
 
 ### Requirement: Mock Integration Management
@@ -115,8 +125,8 @@ And educational notes about real signal structure
 Given a user views a signal detail
 When they click "Ground this signal"
 Then the application should generate a grounded signal with:
-- Overall relevance score (0-100)
-- Dimensional scores (Relevance, Impact, Recency, etc.)
+- Overall relevance score (0-100, inclusive)
+- Dimensional scores (Relevance, Impact, Recency, etc.) each ranging 0-100 inclusive
 - Evidence items from across connected providers
 And display results with clear explanations
 

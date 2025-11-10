@@ -164,8 +164,8 @@ interface DemoGroundedSignal {
   id: string;
   sourceSignalId: string;
   tenantId: string;
-  score: number;           // 0-100
-  dimensions: Array<{label: string; score: number}>;
+  score: number;           // 0-100 (inclusive)
+  dimensions: Array<{label: string; score: number}>; // each score: 0-100 (inclusive)
   evidence: DemoEvidenceItem[];
   createdAt: string;
 }
@@ -200,7 +200,7 @@ interface DemoGroundedSignal {
 - Company name form when no tenant exists
 - Generates paired IDs: `tenantId` + `connectorsTenantId`
 - Visual display of mapping with explanations
-- Clear annotation about `X-Tenant-Id` header usage
+- Clear annotation about `X-Tenant-Id: <connectorsTenantId>` header usage
 
 ### 3. Integration Management Flow
 - Provider tiles showing connection status

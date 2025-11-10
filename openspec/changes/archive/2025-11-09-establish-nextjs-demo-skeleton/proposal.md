@@ -86,10 +86,15 @@ Convert the existing `examples/nextjs-demo` from a basic Next.js starter into a 
 ## Success Criteria
 
 - Engineers can run `npm run dev` in `examples/nextjs-demo` and experience the complete mock flow
+  - **Validation**: Demo runs without console errors, loads in <3 seconds, completes full flow
 - Users can understand tenant mapping, connector lifecycle, and signal grounding through interaction
+  - **Validation**: User testing shows 90%+ comprehension through interactive walkthrough
 - Code serves as clear reference for real Next.js + Connectors integration
+  - **Validation**: Code review checklist confirms patterns match production integration guidelines
 - Demo is discoverable from main project documentation
+  - **Validation**: Direct links exist in README.md and integration guide with setup instructions
 - All functionality works without external services or credentials
+  - **Validation**: Demo functions with network disabled and no .env files required
 
 ## Dependencies
 

@@ -58,7 +58,7 @@ Note: Dockerization is intentionally scheduled late (post-MVP) per project prefe
 
 # Change Backlog for Examples/ NextJS Demo Sub Project
 
-1) add-nextjs-demo-skeleton — Establish `examples/nextjs-demo` as a dedicated mock UX sandbox using Next.js App Router, Tailwind, and shadcn; add a landing page clearly labeled as mock-only.
+1) establish-nextjs-demo-skeleton — Establish `examples/nextjs-demo` as a dedicated mock UX sandbox using Next.js App Router, Tailwind, and shadcn; add a landing page clearly labeled as mock-only.
 
 2) add-nextjs-demo-mock-domain-model — Introduce a small TypeScript domain model (`DemoUser`, `DemoTenant`, `DemoConnection`, `DemoSignal`, `DemoGroundedSignal`) and mock data utilities that mirror real Connectors concepts without any network calls.
 

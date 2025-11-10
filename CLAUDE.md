@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) and other AI assistants when working with code in this repository.
 
 <!-- OPENSPEC:START -->
 # OpenSpec Instructions
@@ -16,14 +16,32 @@ Use `@/openspec/AGENTS.md` to learn:
 - How to create and apply change proposals
 - Spec format and conventions
 - Project structure and guidelines
+- How backend and frontend are organized in this repo
+- Which commands and package managers to prefer for each part of the stack
 
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+## Visual Analysis for Screenshots
+
+When working with screenshots or visual content:
+- Use the visual-expert agent (`@.claude/agents/visual-expert.md`) for analyzing screenshots, extracting design requirements, layout details, component specifications, and styling information
+- The visual-expert agent specializes in visual analysis and can provide detailed insights about UI patterns, design systems, spacing, colors, and component structure
+- For UI component creation tasks with screenshots, the ui-component-creator agent will automatically coordinate with the visual-expert agent
+
 ## Development Commands
 
-### Core Commands
+This repository has two main parts:
+
+- Backend: Rust-based Poblysh Connectors API (Axum + SeaORM + PostgreSQL)
+- Frontend: Next.js App Router demo in `examples/nextjs-demo` used as a mock UX sandbox
+
+Assistants must:
+- Use the Rust/Cargo commands for backend work
+- Use Bun-based commands (not npm) for the Next.js demo frontend
+
+### Backend (Rust / Cargo) Core Commands
 - **Run the service**: `cargo run`
 - **Run tests**: `cargo test`
 - **Check code**: `cargo check`
@@ -31,31 +49,46 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 - **Run clippy**: `cargo clippy`
 - **Build for release**: `cargo build --release`
 
-### Database Operations
+### Backend Database Operations
 - **Run migrations manually**: `cargo run -- migrate up`
 - **Rollback migration**: `cargo run -- migrate down`
 - **Check migration status**: `cargo run -- migrate status`
 
-### Running Specific Tests
+### Backend: Running Specific Tests
 - **Unit tests only**: `cargo test --lib`
 - **Integration tests**: `cargo test --test '*'`
 - **Specific test**: `cargo test test_name`
 
-### Configuration
+### Backend Configuration
 The service uses layered `.env` files with `POBLYSH_*` environment variables. The main configuration file is `src/config/mod.rs`. See `README.md` for the complete configuration precedence and available variables.
 
 ## Architecture Overview
 
-This is the **Poblysh Connectors API v0.1**, a Rust-based service for managing integrations with collaboration tools (GitHub, Jira, Google Workspace, Slack, Zoho).
+This repository contains:
 
-### Tech Stack
+1. **Poblysh Connectors API v0.1 (Backend)**  
+   A Rust-based service for managing integrations with collaboration tools (GitHub, Jira, Google Workspace, Slack, Zoho).
+
+2. **Next.js Demo App (Frontend)**  
+   A Next.js App Router sandbox under `examples/nextjs-demo` that demonstrates mock Poblysh ↔ Connectors flows.  
+   - Uses Bun as the preferred package manager and runtime.
+   - Uses modern Next.js app directory patterns and client/server components.
+
+### Backend Tech Stack
 - **Language**: Rust (2024 edition) with Tokio async runtime
 - **Web Framework**: Axum with utoipa for OpenAPI/Swagger documentation
 - **Database**: PostgreSQL with SeaORM for data access
 - **Configuration**: Layered `.env` files with `POBLYSH_*` environment variables
 - **Testing**: Cargo test with testcontainers for database integration tests
 
-### Directory Structure
+### Frontend Tech Stack
+- **Framework**: Next.js App Router (current major; treat as Next.js 16+ compatible)
+- **Language**: TypeScript + React
+- **Package Manager / Runtime**: Bun (preferred over npm/yarn)
+- **Location**: `examples/nextjs-demo`
+- **Usage**: Mock UX only (no real backend calls by default), aligned with OpenSpec domain model
+
+### Backend Directory Structure
 ```
 src/
 ├── main.rs              # CLI entry point (server + migrations)
@@ -64,9 +97,20 @@ src/
 ├── config/              # Configuration loading
 ├── models/              # SeaORM entities (Provider, Connection)
 ├── repositories/        # Database access layer
-├── handlers/           # HTTP request handlers
+├── handlers/            # HTTP request handlers
 ├── seeds/              # Database seeding utilities
-└── db.rs               # Database connection pool
+└── db.rs                # Database connection pool
+```
+
+### Frontend Directory Structure (Next.js Demo)
+```
+examples/nextjs-demo/
+├── app/                 # App Router entrypoints (pages, routes)
+├── components/          # UI and demo components
+├── lib/demo/            # Mock domain model, state, generators
+├── public/              # Static assets
+├── package.json         # Metadata (prefer Bun to run scripts)
+└── bun.lock             # Indicates Bun usage is preferred
 ```
 
 ### Key Components
@@ -87,27 +131,38 @@ src/
 - **State Management**: Shared database connection pool
 
 ### OpenSpec System
-This project uses a specification-driven development workflow. Before implementing new features:
-1. Check `openspec/specs/` for existing specifications
-2. Review `openspec/changes/` for pending proposals
-3. Follow the workflow in `openspec/AGENTS.md`
+This project uses a specification-driven development workflow for both backend and frontend:
+
+Before implementing new features (API or demo):
+1. Check `openspec/specs/` for existing specifications.
+2. Review `openspec/changes/` for pending proposals.
+3. Follow the workflow in `openspec/AGENTS.md`.
+4. Ensure frontend behavior (Next.js demo) remains consistent with the domain model and flows defined in OpenSpec.
 
 ### Development Patterns
+
+Backend:
 - **Layered Architecture**: API → Services → Repositories → Database
 - **Error Handling**: `thiserror` for libraries, `anyhow` for application
 - **Problem Details Codes**: Use screaming snake case (e.g., `INTERNAL_SERVER_ERROR`) for the `code` field in problem+json responses and specs
 - **Testing**: Unit tests alongside code, integration tests in `tests/`
 - **Database**: Automatic migrations for `local` and `test` profiles
 
+Frontend (Next.js demo):
+- **App Router** and React Server/Client Components
+- Use `"use client"` only where needed; keep most domain/model logic in shared modules under `lib/demo/`
+- Prefer Bun for running scripts (`bun install`, `bun dev`, `bun test` where applicable)
+- Treat the demo as a consumer of the specified Connectors domain model; keep it aligned with OpenSpec requirements
+
 ### Important Files for Context
-- `openspec/AGENTS.md` - Development workflow and spec-driven development
+- `openspec/AGENTS.md` - Authoritative OpenSpec workflow, including backend/frontend guidance
 - `openspec/project.md` - Project conventions
-- `README.md` - Setup and usage instructions
-- `src/main.rs` - CLI commands and entry point
-- `src/config/mod.rs` - Configuration system
+- `README.md` - Backend setup and usage instructions
+- `src/main.rs` - Backend CLI commands and entry point
+- `src/config/mod.rs` - Backend configuration system
 - `src/models/` - SeaORM entity definitions
 - `plan/nextjs-demo/` - PRD, tech specs, API plan, and UI plan for the Next.js mock UX demo
-- `examples/nextjs-demo/` - Next.js App Router mock UX sandbox that demonstrates Poblysh ↔ Connectors flows (Mode A: pure mock, no real API calls)
+- `examples/nextjs-demo/` - Next.js App Router mock UX sandbox that demonstrates Poblysh ↔ Connectors flows (Mode A: pure mock, no real API calls; Bun preferred)
 
 ### Current Implementation Status
 ✅ Database foundation with SeaORM

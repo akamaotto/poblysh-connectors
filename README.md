@@ -320,6 +320,61 @@ cargo run
 - `/docs` - Swagger UI for interactive API documentation
 - `/openapi.json` - OpenAPI specification in JSON format
 
+## Next.js Demo
+
+**⚠️ Mock Demo Only** - A demonstration sandbox that shows how the Poblysh Connectors integration works.
+
+The `examples/nextjs-demo` directory contains a complete Next.js application that demonstrates the end-to-end Poblysh Connectors integration flow without requiring real API access.
+
+### What the Demo Shows
+
+- **User Authentication** (mock)
+- **Tenant Creation & Mapping** 
+- **Connector Management** (GitHub, Zoho Cliq)
+- **Signal Discovery & Scanning**
+- **Signal Grounding** with cross-connector evidence
+
+### Quick Start
+
+```bash
+# Navigate to demo directory
+cd examples/nextjs-demo
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to start the demo.
+
+### Demo Flow
+
+1. **Landing Page** - Enter any email to begin (mock authentication)
+2. **Tenant Setup** - Create your organization and see tenant mapping
+3. **Integrations** - Connect GitHub and/or Zoho Cliq (mock OAuth)
+4. **Signals** - Scan for signals and explore discovered data
+5. **Signal Detail** - Ground signals to see cross-connector evidence
+
+### Educational Features
+
+- **Inline Annotations** - Look for ℹ️ icons to learn about real API equivalents
+- **Progress Tracking** - Navigation bar shows completion progress
+- **Mock Data** - Deterministic, realistic data that demonstrates key concepts
+- **Reference Implementation** - Clean, well-structured code for real integrations
+
+### Architecture
+
+- **Next.js 16** with App Router
+- **TypeScript** for type safety
+- **Tailwind CSS** for styling
+- **React Context** for state management
+- **shadcn/ui** for component library
+
+For complete documentation, see [`examples/nextjs-demo/README.md`](examples/nextjs-demo/README.md).
+
 ## Integration Documentation
 
 - **[Connectors Service Integration Guide](docs/integration/connectors-service.md)** - Canonical guide for Poblysh Core and frontend integration with the Connectors Service, including authentication, tenancy, and end-to-end flows
+- **[Next.js Demo Reference](examples/nextjs-demo/)** - Complete mock implementation showing integration patterns and UI flows

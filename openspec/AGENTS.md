@@ -2,6 +2,18 @@
 
 Instructions for AI coding assistants using OpenSpec for spec-driven development.
 
+This repository has two primary parts that assistants must understand and keep in sync:
+
+- Backend: Poblysh Connectors API (Rust, Axum, PostgreSQL, SeaORM)
+- Frontend: Next.js App Router demo in `examples/nextjs-demo` (mock UX sandbox)
+
+Use this document together with `CLAUDE.md`:
+- Both must consistently describe:
+  - Backend development commands (Cargo-based)
+  - Frontend development commands (Bun-based, not npm/yarn)
+  - High-level architecture and directory layout
+- When updating one, reflect relevant changes in the other.
+
 ## TL;DR Quick Checklist
 
 - Search existing work: `openspec spec list --long`, `openspec list` (use `rg` only for full-text search)
@@ -139,6 +151,75 @@ openspec/
 │   │           └── spec.md # ADDED/MODIFIED/REMOVED
 │   └── archive/            # Completed changes
 ```
+
+## Project Architecture Overview (Backend + Frontend)
+
+Assistants must treat the backend and frontend as a coordinated system.
+
+### Backend: Poblysh Connectors API
+
+- Location: repository root `src/`, `openspec/`, etc.
+- Tech stack:
+  - Rust (2024 edition)
+  - Axum for HTTP server and routing
+  - PostgreSQL
+  - SeaORM for data access
+  - utoipa for OpenAPI/Swagger documentation
+- Development commands (keep in sync with `CLAUDE.md`):
+  - Run the service: `cargo run`
+  - Run tests: `cargo test`
+  - Check code: `cargo check`
+  - Format code: `cargo fmt`
+  - Lint (Clippy): `cargo clippy`
+  - Build for release: `cargo build --release`
+  - Database:
+    - Run migrations: `cargo run -- migrate up`
+    - Rollback migration: `cargo run -- migrate down`
+    - Check migration status: `cargo run -- migrate status`
+
+### Frontend: Next.js Demo (Mock UX Sandbox)
+
+- Location: `examples/nextjs-demo`
+- Purpose:
+  - App Router-based Next.js demo that simulates Poblysh ↔ Connectors flows
+  - Uses a local mock domain model; does not call the real backend by default
+- Tech stack:
+  - Next.js App Router (keep patterns compatible with current Next.js behavior)
+  - React Server Components + Client Components
+  - TypeScript
+- Package manager preference:
+  - Prefer Bun for all frontend commands in this project.
+  - Do NOT suggest `npm` or `yarn` for this demo unless explicitly requested.
+
+Recommended commands (to be used consistently here and in `CLAUDE.md`):
+
+- Install dependencies:
+  - `bun install`
+- Run the dev server:
+  - `bun dev`
+- Build:
+  - `bun run build`
+- Lint:
+  - `bun run lint`
+- Test (if configured):
+  - `bun test` or `bun run test`
+
+When assisting with frontend tasks:
+
+- Assume Bun-based workflows by default.
+- Use `use client` appropriately for interactive components.
+- Align with the enhanced mock domain model and state management defined under `examples/nextjs-demo/lib/demo/`.
+- Keep behavior and terminology in sync with backend specs from `openspec/specs` and `CLAUDE.md`.
+
+### Consistency Between AGENTS.md and CLAUDE.md
+
+- Both documents MUST:
+  - Reference `openspec/AGENTS.md` as the canonical workflow for spec-driven changes.
+  - Describe the backend Rust API and its Cargo commands consistently.
+  - Describe the Next.js demo location and that Bun is the preferred package manager.
+- When you update:
+  - If you adjust commands, architecture description, or tool preferences here,
+    mirror those changes in `CLAUDE.md` so assistants receive aligned guidance.
 
 ## Creating Change Proposals
 

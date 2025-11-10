@@ -190,8 +190,8 @@ All flows are implemented fully in the Next.js app using mock state.
   - On click:
     - Generate a `DemoGroundedSignal`:
       - `sourceSignalId`
-      - `score` (0–100)
-      - `dimensions` (e.g., “Relevance”, “Impact”, “Confidence”)
+      - `score` (0–100, inclusive)
+      - `dimensions` (e.g., "Relevance", "Impact", "Confidence") each ranging 0-100 inclusive
       - `evidence[]`:
         - Fake messages from:
           - “Other repos”

@@ -1,359 +1,318 @@
-# Next.js Demo UX Plan (Mock-Only)
+connectors/plan/nextjs-demo/ui.md
+# Next.js Demo UX Plan — Black & White Minimalist UI
 
-This document defines the UI/UX for the `examples/nextjs-demo` subproject.
-
-Goals:
-- Provide a fully mock UX sandbox that demonstrates the end-to-end Connectors integration story.
-- Make it easy for Poblysh devs/designers to:
-  - Click through the flow.
-  - Inspect the Next.js code.
-  - Map each step to the real Connectors integration guide and OpenSpec changes.
-- Avoid real network calls, real OAuth, or real secrets.
-- Use:
-  - Next.js App Router
+Purpose:
+- A clean, black and white mock-only UX that demonstrates the Connectors story.
+- Fast to scan. Brevity and elegance over exposition.
+- Built with:
+  - Next.js App Router (Next 16+ semantics)
   - Tailwind CSS
-  - shadcn/ui components
-- Keep the flow opinionated but simple so it feels like a real product journey.
+  - shadcn/ui primitives
+  - Native Next.js components (links, navigation, route handlers)
 
-Non-goals:
-- No real authentication.
-- No real Connectors/OpenAPI integration.
-- No production-grade UX polish.
-- No persistence guarantees beyond in-memory / client state.
+## Black & White Color System
 
----
+Primary Palette:
+- Background: pure white (`bg-white`)
+- Primary text: black (`text-black`)
+- Secondary text: gray-800 (`text-gray-800`)
+- Borders: gray-200 (`border-gray-200`)
+- Dividers: gray-100 (`bg-gray-100`)
 
-## Global UX Principles
+Interactive Elements:
+- Buttons: black background (`bg-black text-white hover:bg-gray-800`)
+- Input borders: black (`border-black focus:border-black`)
+- Focus rings: black (`focus:ring-black`)
 
-1. Explicitly Mock-Only
-   - Show a persistent label/badge: “Mock UX Demo — No real data, no real connections”.
-   - Use neutral demo content; never imply production behavior.
+Status Colors:
+- Error text: red-500 (`text-red-500`)
+- Error borders: red-300 (`border-red-300`)
+- Success badges: green-600 (`text-green-600 bg-green-50 border-green-200`)
+- Warning badges: yellow-600 (`text-yellow-600 bg-yellow-50 border-yellow-200`)
 
-2. Mirror Real Architecture Concepts
-   - Every major step maps to a real-world concern:
-     - User identity → Poblysh user session.
-     - Tenant setup → `X-Tenant-Id` mapping.
-     - Connect provider → Connectors OAuth and connection lifecycle.
-     - Scan → Connectors sync and `/signals`.
-     - Ground → Weak signal → grounded signal model.
-   - Use concise inline hints to show where real integration points would live.
+Grayscale Hierarchy:
+- Text primary: black (`text-black`)
+- Text secondary: gray-800 (`text-gray-800`)
+- Text muted: gray-600 (`text-gray-600`)
+- Borders light: gray-200 (`border-gray-200`)
+- Backgrounds: white (`bg-white`) with gray-50 (`bg-gray-50`) accents
+- UI elements: gray-800/gray-900 range
 
-3. Simple, Legible UI
-   - Minimal navigation.
-   - Clear steps and status indicators.
-   - Use shadcn/ui primitives (Button, Card, Input, Badge, Tabs, etc.).
-   - Layout optimized for desktop; mobile-friendly is a nice-to-have, not required.
+General:
+- One clear headline per page.
+- One clear primary action per page.
+- Short labels, short descriptions.
+- Use whitespace and type, not decoration.
+- Inline teaching kept minimal; deeper context goes into collapsible sections.
 
-4. Deterministic Behavior
-   - Mock data should be deterministic where possible so reloading doesn’t feel random or confusing.
-   - Allow multiple signals/evidence items so flows feel meaningful.
-
----
-
-## Information Architecture
-
-Top-level pages (App Router):
-
-- `/` — Landing / Step 1: Sign in (mock)
-- `/tenant` — Step 2: Create/select tenant and visualize mapping
-- `/integrations` — Step 3: Manage mock connections (GitHub, Zoho Cliq)
-- `/signals` — Step 4: View mock signals for active tenant
-- `/signals/[id]` — Step 5: Signal detail and grounding demo
-
-Optional:
-- A simple top nav or progress indicator present on all pages after login.
-
-### Navigation Behavior
-
-- Before sign-in:
-  - Only `/` accessible.
-- After sign-in but before tenant:
-  - Redirect `/integrations` or `/signals` attempts back to `/tenant`.
-- After tenant creation:
-  - All pages accessible.
-- When state is missing (e.g., hard refresh on deep link):
-  - Show a small “demo state lost” message with a button to restart from `/`.
+Global:
+- Persistent top banner/label: “Mock UX Demo — No real data or connections.”
+- Simple top nav (after mock sign-in):
+  - Tenant
+  - Integrations
+  - Signals
+- Deterministic mock behavior; reloads feel stable.
+- Responsive enough; desktop-first.
 
 ---
 
-## Page-by-Page UX
+## Pages
 
-### 1. `/` — Landing & Mock Sign-In
-
-Purpose:
-- Introduce the demo.
-- Create a mock user session using only an email.
+### `/` — Landing & Mock Sign-In
 
 Layout:
-- Centered panel (shadcn `Card`):
-  - Title: “Poblysh Connectors UX Demo”
-  - Subtitle: “Explore the integration flow with mock data. No real OAuth. No external calls.”
-  - Badge: “Mock-only”
-- Form:
-  - `Input` (email)
-  - Primary `Button`: “Continue”
-- Behavior:
-  - On submit:
-    - Create `DemoUser` in client state.
-    - Route to `/tenant`.
+- Centered shadcn `Card` on white background.
 
-Notes:
-- No password field required; if present, auto-filled or clearly mocked.
-- Copy should explicitly say “This is a simulated sign-in for the demo only.”
+Content:
+- Title: “Poblysh Connectors UX Demo”
+- Subtitle (1 line): “Click through the mock integration flow. No real calls.”
+- Badge: “Mock-only”
+- Email `Input`
+- Primary `Button`: “Continue”
 
----
-
-### 2. `/tenant` — Tenant Creation & Mapping Visualization
-
-Purpose:
-- Demonstrate tenant creation and mapping to a Connectors tenant ID (`X-Tenant-Id` concept).
-
-Layout:
-- If no tenant:
-  - Card:
-    - Title: “Set up your tenant”
-    - Fields:
-      - Company name (Input)
-    - Button: “Create tenant”
+Behavior:
 - On submit:
-  - Generate:
-    - `tenantId` (e.g., “pbl-tenant-1234” style ID)
-    - `connectorsTenantId` (different UUID-style ID)
-- Show summary:
-  - Two-column Card:
-    - Left:
-      - “Poblysh Tenant ID”
-      - Value: `tenantId`
-      - Short hint: “Owned by Poblysh Core.”
-    - Right:
-      - “Connectors Tenant ID (X-Tenant-Id)”
-      - Value: `connectorsTenantId`
-      - Short hint: “Sent in headers to scope Connectors calls.”
-  - Inline annotation:
-    - “In production, the frontend never sets X-Tenant-Id directly. Poblysh Core does.”
-- CTA:
-  - Button: “Continue to Integrations” → `/integrations`
+  - Create mock user in client state.
+  - Navigate to `/tenant`.
 
-Notes:
-- Visually emphasize 1:1 mapping but distinct IDs to reduce future confusion.
+Details (collapsible):
+- Implementation notes: mock-only auth, no passwords.
+- Mapping: where real SSO/session would exist.
 
 ---
 
-### 3. `/integrations` — Mock Integrations Hub
-
-Purpose:
-- Show how a tenant sees connectable integrations and connection states.
+### `/tenant` — Tenant Setup
 
 Layout:
-- Header:
-  - Title: “Integrations”
-  - Subtitle: “Connect mock providers for this tenant.”
-  - Show small pill: “Tenant: <company>”
-- Grid of integration cards (shadcn `Card`):
-  - GitHub
-  - Zoho Cliq (added later; see below)
-- Each card:
-  - Provider logo/icon (simple).
-  - Short description:
-    - GitHub: “Mock GitHub integration for repositories and PR activity.”
-    - Zoho Cliq: “Mock Chat integration for internal conversations.”
-  - Connection state:
-    - If not connected: “Not connected” (Badge).
-    - If connected: “Connected” (Badge).
-  - Actions:
-    - `Connect` button if not connected.
-    - `View details` or `Disconnect` (mock) if connected.
+- Centered `Card`.
 
-GitHub Connect Flow (mock):
-- On `Connect` click:
-  - Show modal:
-    - “Authorize Poblysh (Mock) to access your GitHub data?”
-    - Buttons: “Cancel”, “Authorize”
-  - On “Authorize”:
-    - Create `DemoConnection` with:
-      - `providerSlug = "github"`
-      - `status = "connected"`
-    - Close modal, update card state.
-    - Toast: “GitHub connected (mock). In production, this would use Connectors OAuth endpoints.”
-- When GitHub connected:
-  - Show secondary CTA:
-    - “Scan GitHub for signals” → triggers mock scan (see next page).
+States:
+- No tenant:
+  - Title: “Set up your tenant”
+  - Input: “Company name”
+  - Primary `Button`: “Create tenant”
+- With tenant:
+  - Show:
+    - “Poblysh Tenant ID”
+    - “Connectors Tenant ID (X-Tenant-Id)”
+  - Primary `Button`: “Continue to Integrations”
 
-Zoho Cliq Connect Flow (mock, when implemented):
-- Same pattern as GitHub; text explains chat-style signals.
+Tone:
+- Plain labels, no long paragraphs.
+
+Details (collapsible):
+- One short explanation of how `X-Tenant-Id` is derived and used.
+- Clarify: frontend does not set it directly in production.
 
 ---
 
-### 4. `/signals` — Mock Signals List
+### `/integrations` — Integrations Hub
 
-Purpose:
-- Simulate the `/signals` endpoint experience and how a product UI might visualize it.
+Layout:
+- Header row:
+  - Title: “Integrations”
+  - Small text: “Tenant: {name}”
+- Grid or vertical stack of shadcn `Card`s.
 
-Entry points:
-- From `/integrations` after connect:
-  - “Scan GitHub for signals” → generate signals → redirect to `/signals`.
-- From nav:
-  - “Signals” tab/link (enabled after tenant + at least one connection).
+Cards (examples):
+- GitHub
+- Zoho Cliq
+
+Each card:
+- Provider name + monochrome icon.
+- Status badge:
+  - "Connected" (`bg-black text-white`)
+  - "Not connected" (`bg-white border border-black text-black`)
+  - Error (`bg-red-50 text-red-600 border border-red-200`)
+- Primary `Button`: always black (`bg-black text-white hover:bg-gray-800`)
+  - "Connect" if not connected.
+  - "Disconnect" if connected.
+- Secondary `Button`:
+  - "Details" or "Scan for signals" when relevant (`border border-black text-black hover:bg-gray-50`).
+
+Connect flow (mock):
+- On “Connect”:
+  - Minimal shadcn `Dialog`:
+    - One-line consent text.
+    - “Cancel” / “Authorize”
+  - On “Authorize”:
+    - Mark as connected.
+    - Toast: “GitHub connected (mock).”
+
+Details (collapsible):
+- Note where real OAuth + Connectors endpoints would plug in.
+
+---
+
+### `/signals` — Signals List
+
+Entry:
+- From nav, or from “Scan for signals” on `/integrations`.
 
 Layout:
 - Header:
   - Title: “Signals”
-  - Subtitle: “Mock signals for your connected integrations.”
-  - Filters row:
-    - Provider filter (multi-select chips: GitHub, Zoho Cliq).
-    - Simple search/filter input (client-only).
-- Content:
-  - If no connections:
-    - Empty state:
-      - Icon
-      - “Connect an integration to see signals.”
-      - Button: “Go to Integrations”
-  - If connected but no scan yet:
-    - Empty state:
-      - “Run a mock scan to populate signals.”
-      - Button: “Scan now” (same generator).
-  - If signals exist:
-    - Table or list (use shadcn `Table` or Cards):
-      - Columns:
-        - Provider (icon + name)
-        - Kind (e.g., `pull_request_opened`, `chat_message`)
-        - Title / short summary
-        - Occurred at
-      - Each row clickable → `/signals/[id]`.
+  - Optional short caption: “Mock signals from connected integrations.”
+- Controls:
+  - Provider filter (monochrome `Badge`/`Select` with black borders).
+  - Simple search `Input` with black borders and focus states.
+  - "Scan" `Button`:
+    - Always black (`bg-black text-white hover:bg-gray-800`)
+    - Disabled state: `bg-gray-100 text-gray-400 border-gray-200`
 
-Mock Scan Behavior:
-- Triggering scan:
-  - Uses mock utilities to generate deterministic signals for:
-    - Current tenant ID.
-    - Each connected provider.
-  - Show a short loading skeleton (not required but nice).
-  - On completion, show toast: “Scan complete (mock signals generated).”
-- No real API calls.
+States:
+- No connections:
+  - Simple empty state:
+    - Text: “Connect an integration to see signals.”
+    - Button: “Go to Integrations”
+- Connected, no scan:
+  - Text: “Run a mock scan to generate signals.”
+  - Button: “Scan”
+- With signals:
+  - shadcn `Table` or list:
+    - Columns: Provider, Kind, Title, Occurred at.
+    - Rows clickable → `/signals/[id]`.
 
-Notes:
-- Add a tiny caption:
-  - “In production, this list is populated via Connectors `GET /signals` scoped by X-Tenant-Id. Here, we generate mock data with the same shape.”
+Scan behavior (mock):
+- Single short loading skeleton.
+- Deterministic generated signals.
+- Toast: “Scan complete (mock).”
+
+Details (collapsible):
+- How this mirrors `GET /signals` with `X-Tenant-Id`.
 
 ---
 
-### 5. `/signals/[id]` — Signal Detail & Grounding Demo
-
-Purpose:
-- Demonstrate drilling into a signal and converting a weak signal into a grounded one.
+### `/signals/[id]` — Signal Detail & Grounding
 
 Layout:
-- Header:
-  - Back link: “← Back to Signals”
-  - Title: from signal (e.g., “PR opened on repo X”).
-  - Provider badge.
-- Sections:
+- Back link: “← Signals”
+- Title from signal.
+- Provider badge (monochrome).
 
-1) Signal Summary
-   - Key fields:
-     - Kind
-     - Provider
-     - Occurred at
-     - Repo / channel / entity
-   - Short text: “This is a mock representation of a normalized signal stored by Connectors.”
+Sections:
+1) Summary
+- Kind
+- Provider
+- Occurred at
+- Key metadata (repo/channel/etc.)
 
-2) Raw/Metadata
-   - Collapsible panel:
-     - Show JSON-ish view of `metadata` fields.
-     - Emphasize shape similar to real API but simplified.
+2) Raw data
+- Small shadcn `Collapsible`:
+  - Label: “View raw payload”
+  - Inside: formatted JSON-like block (monochrome).
 
-3) Ground Signal (Mock)
-   - Card:
-     - Title: “Ground this signal”
-     - Description:
-       - “Gather related activity to understand if this is noteworthy.”
-     - Button:
-       - “Ground this signal”
-   - On click:
-     - Generate `DemoGroundedSignal`:
-       - Score (e.g., 78 / 100).
-       - Dimensions:
-         - Relevance, Impact, Recency, Support, etc.
-       - Evidence list:
-         - Items referencing:
-           - Other mock GitHub signals.
-           - (When Zoho Cliq integrated) mock chat messages.
-           - Optional “web snippet” style text.
-     - Display results inline:
-       - Score:
-         - Use a progress bar or badge with color coding.
-       - Evidence:
-         - List grouped by source (GitHub, Zoho Cliq, “web”).
-       - Explanation:
-         - 1–3 bullet points explaining why the score is high/low.
+3) Grounding
+- shadcn `Card` with black border (`border-black`):
+  - Title: "Ground this signal"
+  - Short line: "Combine related activity into one view."
+  - Primary `Button`: "Ground" (`bg-black text-white hover:bg-gray-800`)
 
-Copy guidance:
-- Add a note:
-  - “This grounding behavior is mocked to illustrate the concept. Real implementations use live data from Connectors and other sources.”
+On “Ground”:
+- Generate mock grounded signal:
+  - Overall score (0–100)
+  - Per-dimension scores (Relevance, Impact, etc.)
+  - Evidence list:
+    - GitHub items
+    - Zoho Cliq items (if connected)
+    - Optional “web snippet”
+- Display:
+  - Score as monochrome badge or progress bar (`bg-gray-200` with black fill).
+  - Evidence as simple list with black borders.
+  - One-line explanation in `text-gray-600`.
+
+Final success:
+- If showing "grounded" completion, use a single green badge:
+  - `bg-green-50 text-green-600 border border-green-200`
+  - e.g., "Grounded" or "Ready".
+- No other green usage in the interface.
+
+Details (collapsible):
+- How real grounding would call APIs and aggregate sources.
 
 ---
 
-## Visual Style & Components
+## Components & Patterns
 
-Use shadcn/ui + Tailwind for:
+### Black & White Component System
 
-- Layout:
-  - `Container` / `max-w-4xl` central layouts.
-- Navigation:
-  - Simple top nav once signed in:
-    - “Tenant”
-    - “Integrations”
-    - “Signals”
-- Cards:
-  - For grouped content (tenant summary, integration tiles, ground signal).
-- Buttons:
-  - Primary: solid for main actions.
-  - Secondary: outline for navigation/less critical.
-- Badges:
-  - For statuses (Mock-only, Connected, Not connected).
-- Tables:
-  - For signals list.
-- Modals/Dialogs:
-  - For connect confirmation; minimal copy.
+Primary Elements:
+- **Buttons**: Always `bg-black text-white hover:bg-gray-800`
+- **Inputs**: `border-black focus:border-black focus:ring-black`
+- **Cards**: `border-black` or `border-gray-200`
+- **Badges**: Monochrome with black text/white backgrounds or white text/black backgrounds
+
+Use shadcn/ui:
+- Layout: `Container` / `Card` / `Separator` with black borders
+- Inputs: `Input`, `Label` with black focus states
+- Actions: `Button` (always black), `Dialog` with black borders
+- Feedback: `Badge` (monochrome), `Toast`, `Skeleton`, `Collapsible`
+
+Use native Next.js:
+- `app/` router.
+- `Link` for navigation (black text with underline on hover).
+- Server components for layout + static.
+- Client components for interactive state.
+
+## Typography System
+
+- Headings: `text-black font-semibold`
+- Body text: `text-gray-800`
+- Muted text: `text-gray-600`
+- Error text: `text-red-500`
+
+## Interaction States
+
+- Hover: Slightly lighter gray (`hover:bg-gray-800` for buttons)
+- Focus: Black outline (`focus:ring-black`)
+- Disabled: Light gray with muted text (`bg-gray-100 text-gray-400`)
+- Loading: Skeleton with gray-200 background
+
+Copy style:
+- Short.
+- Concrete.
+- No marketing fluff.
+- Teaching content hidden behind collapsibles or tooltips.
 
 Accessibility:
-- Reasonable defaults:
-  - Proper button semantics.
-  - Label inputs.
-  - Clear text for color-coded statuses.
+- Proper semantics: Use semantic HTML5 elements (`<button>`, `<input>`, `<main>`, `<nav>`, etc.)
+- Clear labels: All interactive elements must have accessible labels and descriptions
+- Color is a hint, not the only signal: Ensure all information is conveyed through text, icons, or other means
+- High contrast maintained throughout (black/white/gray only)
+- Keyboard navigation: All interactive elements must be keyboard accessible
+- Screen reader support: Use ARIA labels and roles appropriately
+- Focus management: Clear focus indicators (`focus:ring-2 focus:ring-black`) and logical tab order
+- Text alternatives: All meaningful images and icons must have alt text or ARIA labels
+- Error announcements: Form errors should be announced to screen readers
 
----
+## Specific Accessibility Requirements
 
-## Annotations & Teaching Hooks
+Interactive Elements:
+- Buttons: Use `<button>` element with accessible inner text
+- Links: Use `<a>` element with descriptive text
+- Forms: Use `<label>` elements properly associated with inputs
+- Dialogs: Implement proper focus trapping and escape key handling
 
-Throughout the UI, we should embed short, low-noise hints that link UX to architecture:
+Screen Reader Support:
+- Page structure: Use proper heading hierarchy (`h1`, `h2`, etc.)
+- Navigation: Use `<nav>` with proper ARIA landmarks
+- Main content: Use `<main>` with appropriate landmarks
+- Status updates: Use `aria-live` regions for dynamic content
 
-Examples:
-- On `/tenant`:
-  - “In real Poblysh, this mapping drives the `X-Tenant-Id` header sent from the backend to the Connectors API.”
-- On `/integrations` (after connect):
-  - “In production, this step corresponds to starting OAuth with `/connect/{provider}` and handling the callback.”
-- On `/signals`:
-  - “This list mimics `GET /signals` results. Here we keep everything local and fake.”
-- On `/signals/[id]` (grounded view):
-  - “Grounding uses multiple signals/evidence sources. In production, this would query real connectors and internal indexes.”
+Keyboard Navigation:
+- Tab order: Logical and intuitive navigation flow
+- Focus indicators: Visible black focus rings on all interactive elements
+- Skip links: Provide skip-to-content links for keyboard users
+- Modal focus: Proper focus management in dialogs and modals
 
-These hints should be:
-- Short.
-- Placed near relevant components.
-- Clearly styled as “info” (muted text or small info icon + tooltip).
+## Implementation Notes
 
----
+All interactive elements must follow the black and white system:
+- No blue, green, yellow, or other accent colors except:
+  - Red for error states only
+  - Single green badge for final "grounded" success state
+- Consistent use of black backgrounds for primary actions
+- White backgrounds with black borders for secondary actions
+- Gray scale hierarchy for all other elements
 
-## Future: Real Integration Mode (Out of Scope for Now)
-
-We anticipate a future “Mode B” where:
-
-- Route handlers call the real Connectors API.
-- Operator tokens are stored server-side only.
-- The mock UI doubles as an integration reference.
-
-For this UI plan:
-- That mode MUST be a separate, explicitly toggled track.
-- The current document is strictly about Mode A: pure mock UX.
-
----
+End.
