@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use axum::http::{HeaderName, Method};
 use axum::{
     Router,
     extract::Request,
@@ -14,6 +15,7 @@ use axum::{
 };
 use sea_orm::DatabaseConnection;
 use std::time::Duration;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
@@ -113,6 +115,8 @@ pub fn create_app(state: AppState) -> Router {
             "/grounded-signals/{id}",
             delete(handlers::grounded_signals::delete_grounded_signal),
         )
+        .route("/api/v1/tenants", post(handlers::tenants::create_tenant))
+        .route("/api/v1/tenants/{id}", get(handlers::tenants::get_tenant))
         .route("/connect/{provider}", post(handlers::connect::start_oauth))
         .route(
             "/webhooks/{provider}",
@@ -123,11 +127,32 @@ pub fn create_app(state: AppState) -> Router {
             auth_middleware,
         ));
 
-    // Combine all routes with tracing
+    // Combine all routes with CORS, tracing, and trace ID middleware
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)
+        // CORS: allow frontend dev origin to call backend.
+        // For local development we allow:
+        // - http://localhost:3000
+        // - http://127.0.0.1:3000
+        // You can tighten this as needed.
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any) // Simplified for local dev; restrict in production.
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PATCH,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    HeaderName::from_static("x-tenant-id"),
+                ]),
+        )
         // Add HTTP request tracing
         .layer(
             TraceLayer::new_for_http()
@@ -341,6 +366,8 @@ pub async fn run_server(
         crate::handlers::grounded_signals::get_grounded_signal,
         crate::handlers::grounded_signals::update_grounded_signal,
         crate::handlers::grounded_signals::delete_grounded_signal,
+        crate::handlers::tenants::create_tenant,
+        crate::handlers::tenants::get_tenant,
         crate::handlers::connect::start_oauth,
         crate::handlers::connect::oauth_callback,
         crate::handlers::webhooks::ingest_webhook,
@@ -364,6 +391,9 @@ pub async fn run_server(
             crate::handlers::signals::SignalInfo,
             crate::handlers::signals::SignalsResponse,
             crate::handlers::signals::ListSignalsQuery,
+            crate::handlers::tenants::CreateTenantRequestDto,
+            crate::handlers::tenants::CreateTenantResponseDto,
+            crate::handlers::tenants::TenantResponseMeta,
             crate::handlers::connect::ProviderPath,
             crate::handlers::connect::OAuthCallbackQuery,
             crate::handlers::connect::ConnectionResponse,
@@ -397,6 +427,7 @@ pub async fn run_server(
         (name = "jobs", description = "Jobs listing and management endpoints"),
         (name = "signals", description = "Signals listing and querying endpoints"),
         (name = "grounded-signals", description = "Grounded signals management endpoints"),
+        (name = "tenants", description = "Tenant management endpoints"),
     ),
     security(
         ("bearer_auth" = []),

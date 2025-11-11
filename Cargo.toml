@@ -36,7 +36,7 @@ log = "0.4.22"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 tracing-log = "0.2.0"
-tower-http = { version = "0.6.2", features = ["trace"] }
+tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 metrics = "0.23.0"
 tokio-util = "0.7.17"
 url = { version = "2.5.4", features = ["serde"] }

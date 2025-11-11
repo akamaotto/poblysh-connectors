@@ -16,6 +16,7 @@ import {
   DemoWebhook,
   DemoToken,
   DemoRateLimit,
+  DemoTenant,
   DemoApiResponse,
 } from "./types";
 import {
@@ -148,6 +149,49 @@ export class SharedBackendClientWrapper implements DemoApiClient {
    */
   async getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>> {
     return this.sharedClient.getRateLimits();
+  }
+
+  // Tenant operations
+  async createTenant(
+    tenant: { name: string; metadata?: Record<string, unknown> }
+  ): Promise<DemoApiResponse<DemoTenant>> {
+    // Transform the response from the SharedBackendClient to match DemoTenant interface
+    const response = await this.sharedClient.createTenant(tenant);
+
+    // Transform the response data to match DemoTenant structure
+    const demoTenant: DemoTenant = {
+      id: response.data.id || `tenant-${Date.now()}`,
+      name: response.data.name || tenant.name,
+      slug: tenant.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      connectorsTenantId: response.data.id,
+      createdAt: response.data.created_at || new Date().toISOString(),
+      plan: 'free', // Default plan, could be enhanced based on metadata
+    };
+
+    return {
+      data: demoTenant,
+      meta: response.meta,
+    };
+  }
+
+  async getTenant(tenantId: string): Promise<DemoApiResponse<DemoTenant>> {
+    // Use the SharedBackendClient's getTenant method
+    const response = await this.sharedClient.getTenant(tenantId);
+
+    // Transform the response data to match DemoTenant structure
+    const demoTenant: DemoTenant = {
+      id: response.data.id || tenantId,
+      name: response.data.name || 'Unknown Tenant',
+      slug: response.data.name?.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'unknown',
+      connectorsTenantId: response.data.id || tenantId,
+      createdAt: response.data.created_at || new Date().toISOString(),
+      plan: 'free', // Default plan, could be enhanced based on metadata
+    };
+
+    return {
+      data: demoTenant,
+      meta: response.meta,
+    };
   }
 
   // ============================================================================

@@ -175,6 +175,33 @@ Once the container is running on `http://localhost:8080`, open `http://localhost
 
 When you’re finished, stop the container with `Ctrl+C` and mention the steps you ran in PR descriptions so reviewers know the Docker and Swagger workflow has been validated.
 
+## TODO: Provider OAuth App Setup
+
+To support real integrations (GitHub, Slack, Google/Gmail, etc.), you must configure provider-owned OAuth / App credentials that Poblysh controls and tenants authorize.
+
+For each provider you enable in Connectors:
+
+1. Create a Poblysh-owned app:
+   - Use a clear name such as `Poblysh GitHub Integration`, `Poblysh Slack Integration`, `Poblysh Google Workspace Integration`.
+   - Register under Poblysh-controlled accounts/organizations.
+2. Configure redirect URLs to the Connectors API:
+   - Use your deployed base URL with provider-specific callbacks:
+     - `https://connectors.poblysh.com/connect/github/callback`
+     - `https://connectors.poblysh.com/connect/slack/callback`
+     - `https://connectors.poblysh.com/connect/google/callback`
+   - For local/dev, register equivalent localhost URLs (e.g. `http://localhost:8080/connect/github/callback`).
+3. Select minimal scopes required for your use cases:
+   - GitHub: repository/org access needed for signals.
+   - Slack: workspace scopes for channels/messages/events as required.
+   - Google/Gmail: read scopes for mail/drive/calendar depending on connectors you enable.
+4. Store client IDs/secrets and webhook secrets as environment variables (see next section) and never commit them to the repo.
+5. Verify:
+   - `POST /connect/{provider}` uses the configured client ID and redirect URL.
+   - `GET /connect/{provider}/callback` can exchange the authorization code / installation payload.
+   - Tokens/installation metadata are persisted as encrypted tenant-scoped Connections.
+
+These steps are required before enabling real Mode B flows in the Next.js demo or production environments.
+
 ## Configuration System
 
 The Connectors API loads configuration from layered `.env` files and environment variables. Precedence (lowest to highest):
@@ -201,6 +228,34 @@ Configuration keys use the `POBLYSH_` prefix. The MVP fields are:
 - `POBLYSH_DB_MAX_CONNECTIONS` – maximum database connections (default: 10)
 - `POBLYSH_DB_ACQUIRE_TIMEOUT_MS` – connection acquire timeout in milliseconds (default: 5000)
 - `POBLYSH_CRYPTO_KEY` – base64-encoded 32 byte key used to encrypt access/refresh tokens (required). See [Crypto Key Rotation Guide](docs/runbooks/local-crypto-rotation.md) for rotation procedures.
+
+#### Provider OAuth and Webhook Configuration
+
+Define provider-specific configuration in your `.env` / `.env.local` files so the OAuth start/callback endpoints and connectors can be wired without changing code. Suggested keys (extend as needed):
+
+- GitHub:
+  - `POBLYSH_GITHUB_APP_CLIENT_ID`
+  - `POBLYSH_GITHUB_APP_CLIENT_SECRET`
+  - `POBLYSH_GITHUB_APP_WEBHOOK_SECRET`
+  - `POBLYSH_GITHUB_APP_ID` (for GitHub App installs)
+- Slack:
+  - `POBLYSH_SLACK_CLIENT_ID`
+  - `POBLYSH_SLACK_CLIENT_SECRET`
+  - `POBLYSH_SLACK_SIGNING_SECRET`
+- Google / Gmail:
+  - `POBLYSH_GOOGLE_CLIENT_ID`
+  - `POBLYSH_GOOGLE_CLIENT_SECRET`
+  - `POBLYSH_GOOGLE_PROJECT_ID`
+  - `POBLYSH_GOOGLE_PUBSUB_VERIFICATION_TOKEN` (if using Pub/Sub push)
+- Zoho:
+  - `POBLYSH_ZOHO_CLIENT_ID`
+  - `POBLYSH_ZOHO_CLIENT_SECRET`
+  - `POBLYSH_ZOHO_REDIRECT_URI` (if provider requires explicit registration)
+
+Conventions:
+
+- Keep all secrets in `.env.local` or your secrets manager; do not commit real values.
+- Use these keys in the OAuth start/callback handlers and connector implementations so each environment (local, staging, prod) can point at the correct provider apps.
 
 ### Mail Spam Filtering
 

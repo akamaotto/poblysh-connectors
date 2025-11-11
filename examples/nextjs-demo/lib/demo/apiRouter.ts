@@ -16,6 +16,7 @@ import {
   DemoWebhook,
   DemoToken,
   DemoRateLimit,
+  DemoTenant,
   DemoApiResponse,
 } from "./types";
 import { getDemoConfig } from "./demoConfig";
@@ -64,6 +65,12 @@ export interface DemoApiClient {
 
   // Rate limit operations
   getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>>;
+
+  // Tenant operations
+  createTenant(
+    tenant: { name: string; metadata?: Record<string, unknown> }
+  ): Promise<DemoApiResponse<DemoTenant>>;
+  getTenant(tenantId: string): Promise<DemoApiResponse<DemoTenant>>;
 }
 
 /**
@@ -241,6 +248,51 @@ class MockApiClient implements DemoApiClient {
 
     return {
       data: rateLimits,
+      meta: {
+        requestId: `mock-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+
+  async createTenant(
+    tenant: { name: string; metadata?: Record<string, unknown> }
+  ): Promise<DemoApiResponse<DemoTenant>> {
+    await this.mockDelay(MOCK_DELAYS.SLOW);
+
+    const newTenant: DemoTenant = {
+      id: `tenant-${Date.now()}`,
+      name: tenant.name,
+      slug: tenant.name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      connectorsTenantId: `conn-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      plan: 'free',
+    };
+
+    return {
+      data: newTenant,
+      meta: {
+        requestId: `mock-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+
+  async getTenant(tenantId: string): Promise<DemoApiResponse<DemoTenant>> {
+    await this.mockDelay(MOCK_DELAYS.FAST);
+
+    // Mock implementation - in real would lookup tenant by ID
+    const tenant: DemoTenant = {
+      id: tenantId,
+      name: "Mock Tenant",
+      slug: "mock-tenant",
+      connectorsTenantId: `conn-${tenantId}`,
+      createdAt: new Date().toISOString(),
+      plan: 'free',
+    };
+
+    return {
+      data: tenant,
       meta: {
         requestId: `mock-${Date.now()}`,
         timestamp: new Date().toISOString(),

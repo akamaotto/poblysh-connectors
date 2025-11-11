@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useDemoConfig } from "@/lib/demo/state";
 
 /**
@@ -13,9 +13,15 @@ import { useDemoConfig } from "@/lib/demo/state";
  */
 export function DemoModeIndicator() {
   const config = useDemoConfig();
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Don't render on the server to avoid SSR/client mismatches
-  if (typeof window === "undefined") {
+  // Ensure component only renders on the client to avoid hydration mismatches
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Don't render until mounted on client
+  if (!isMounted) {
     return null;
   }
 

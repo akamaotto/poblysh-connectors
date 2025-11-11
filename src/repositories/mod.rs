@@ -10,6 +10,7 @@ pub mod provider;
 pub mod signal;
 pub mod sync_job;
 pub mod sync_metadata;
+pub mod tenant;
 pub mod tenant_signal_config;
 
 pub use connection::ConnectionRepository;
@@ -21,4 +22,5 @@ pub use provider::ProviderRepository;
 pub use signal::SignalRepository;
 pub use sync_job::{ListJobsConfig, ListJobsResult, SyncJobRepository};
 pub use sync_metadata::{ConnectionSyncMetadata, MIN_SYNC_INTERVAL_SECONDS};
+pub use tenant::{TenantRepository, CreateTenantRequest};
 pub use tenant_signal_config::TenantSignalConfigRepository;

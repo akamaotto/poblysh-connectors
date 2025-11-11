@@ -45,6 +45,13 @@ pub async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // Allow CORS preflight requests to pass through without authentication.
+    // Browsers do not send Authorization headers on OPTIONS, so enforcing auth
+    // here prevents legitimate cross-origin requests from reaching the API.
+    if request.method() == axum::http::Method::OPTIONS {
+        return Ok(next.run(request).await);
+    }
+
     let headers = request.headers().clone();
 
     // Extract trace_id from request context for consistent error responses

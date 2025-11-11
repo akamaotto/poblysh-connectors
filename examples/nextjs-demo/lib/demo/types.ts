@@ -683,6 +683,9 @@ export interface DemoState {
     authEvents?: string;
   };
 
+  /** Tenant mappings for Mode B (real API) */
+  tenantMappings: import('./tenantMapping').TenantMapping[];
+
   /** Demo configuration */
   config: DemoConfig;
 }
@@ -736,6 +739,8 @@ export type DemoAction =
 
   | { type: 'SET_LOADING'; payload: { key: keyof DemoState['loading']; value: boolean } }
   | { type: 'SET_ERROR'; payload: { key: keyof DemoState['errors']; value?: string } }
+  | { type: 'SET_TENANT_MAPPINGS'; payload: import('./tenantMapping').TenantMapping[] }
+  | { type: 'ADD_TENANT_MAPPING'; payload: import('./tenantMapping').TenantMapping }
   | { type: 'RESET_STATE' };
 
 /**

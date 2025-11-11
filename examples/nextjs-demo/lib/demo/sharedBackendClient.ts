@@ -22,6 +22,32 @@ import {
 import { getDemoConfig } from "./demoConfig";
 
 // ============================================================================
+// TENANT RESPONSE TYPES
+// ============================================================================
+
+/**
+ * Response data structure for tenant creation API calls.
+ */
+interface CreateTenantResponseData {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Response data structure for tenant retrieval API calls.
+ */
+interface TenantResponseData {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
 // ERROR TYPES - Re-exported from types module
 // ============================================================================
 
@@ -879,6 +905,24 @@ export class SharedBackendClient {
   async getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>> {
     return this.retryWithBackoff(async () => {
       return this.makeRequest<DemoRateLimit[]>("GET", "/api/v1/rate-limits");
+    });
+  }
+
+  /**
+   * Creates a new tenant
+   */
+  async createTenant(tenant: {name: string, metadata?: object}): Promise<DemoApiResponse<CreateTenantResponseData>> {
+    return this.retryWithBackoff(async () => {
+      return this.makeRequest<CreateTenantResponseData>("POST", "/api/v1/tenants", tenant);
+    });
+  }
+
+  /**
+   * Gets a tenant by ID.
+   */
+  async getTenant(tenantId: string): Promise<DemoApiResponse<TenantResponseData>> {
+    return this.retryWithBackoff(async () => {
+      return this.makeRequest<TenantResponseData>("GET", `/api/v1/tenants/${tenantId}`);
     });
   }
 

@@ -22,6 +22,7 @@ import {
 } from './types';
 import { MOCK_AUTH_CONFIG } from './mockAuth';
 import { loadDemoConfig, validateConfiguration, logConfigurationValidation } from './demoConfig';
+import { TenantMapping, loadTenantMappings } from './tenantMapping';
 
 /**
  * Creates initial demo state with runtime configuration.
@@ -91,7 +92,7 @@ function createInitialState(): DemoState {
       errorRate: '10%',
       timingMode: 'realistic',
       providerComplexity: 'detailed',
-      
+
       // Runtime mode configuration
       mode: runtimeConfig.mode,
       connectorsApiBaseUrl: runtimeConfig.connectorsApiBaseUrl,
@@ -99,6 +100,9 @@ function createInitialState(): DemoState {
       configErrors: runtimeConfig.errors,
       configWarnings: runtimeConfig.warnings,
     },
+
+    // Load tenant mappings from localStorage
+    tenantMappings: loadTenantMappings().mappings,
   };
 }
 
@@ -378,6 +382,18 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
           ...state.errors,
           [action.payload.key]: action.payload.value,
         },
+      };
+
+    case 'SET_TENANT_MAPPINGS':
+      return {
+        ...state,
+        tenantMappings: action.payload,
+      };
+
+    case 'ADD_TENANT_MAPPING':
+      return {
+        ...state,
+        tenantMappings: [...state.tenantMappings, action.payload],
       };
 
     case 'RESET_STATE':
@@ -927,3 +943,27 @@ export const setError = (key: keyof DemoState['errors'], value?: string): DemoAc
 export const resetState = (): DemoAction => ({
   type: 'RESET_STATE',
 });
+
+/**
+ * Sets the tenant mappings list.
+ */
+export const setTenantMappings = (tenantMappings: TenantMapping[]): DemoAction => ({
+  type: 'SET_TENANT_MAPPINGS',
+  payload: tenantMappings,
+});
+
+/**
+ * Adds a new tenant mapping.
+ */
+export const addTenantMappingAction = (tenantMapping: TenantMapping): DemoAction => ({
+  type: 'ADD_TENANT_MAPPING',
+  payload: tenantMapping,
+});
+
+/**
+ * Hook to access tenant mappings.
+ */
+export function useDemoTenantMappings(): TenantMapping[] {
+  const { state } = useDemoContext();
+  return state.tenantMappings;
+}

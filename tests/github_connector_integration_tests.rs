@@ -273,7 +273,7 @@ async fn test_github_rate_limit_handling() {
         .await;
 
     // Create connector with mock server
-    let connector = GitHubConnector::new(
+    let _connector = GitHubConnector::new(
         "test_client_id".to_string(),
         "test_client_secret".to_string(),
         "https://localhost:3000/callback".to_string(),
@@ -287,7 +287,7 @@ async fn test_github_rate_limit_handling() {
 
 #[tokio::test]
 async fn test_github_pagination_parsing() {
-    let connector = GitHubConnector::new(
+    let _connector = GitHubConnector::new(
         "test_client_id".to_string(),
         "test_client_secret".to_string(),
         "https://localhost:3000/callback".to_string(),
@@ -312,7 +312,7 @@ async fn test_github_backfill_sync_with_wiremock() {
 
     // Create a GitHub connection for the tenant
     let connection_id = uuid::Uuid::new_v4();
-    let connection = insert_connection(&db, connection_id, tenant_id, "github", "github-user-123")
+    let _connection = insert_connection(&db, connection_id, tenant_id, "github", "github-user-123")
         .await
         .unwrap();
 
@@ -504,7 +504,7 @@ async fn test_github_sync_rate_limit_handling() {
 
     // Create a GitHub connection for the tenant
     let connection_id = uuid::Uuid::new_v4();
-    let connection = insert_connection(&db, connection_id, tenant_id, "github", "github-user-123")
+    let _connection = insert_connection(&db, connection_id, tenant_id, "github", "github-user-123")
         .await
         .unwrap();
 

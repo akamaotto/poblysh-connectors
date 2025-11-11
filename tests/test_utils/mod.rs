@@ -126,6 +126,7 @@ pub async fn insert_connection(
 }
 
 /// Creates a test connection model for testing.
+#[allow(dead_code)]
 pub async fn create_test_connection() -> Result<connectors::models::connection::Model> {
     let db = setup_test_db().await?;
     let tenant_id = create_test_tenant(&db, None).await?;
@@ -142,6 +143,7 @@ pub async fn create_test_connection() -> Result<connectors::models::connection::
 }
 
 /// Creates a test connection with specific ID for testing.
+#[allow(dead_code)]
 pub async fn create_test_connection_with_id(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -159,6 +161,7 @@ pub async fn create_test_connection_with_id(
 }
 
 /// Creates a test connection with specific provider for testing.
+#[allow(dead_code)]
 pub async fn create_test_connection_with_provider(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -190,6 +193,7 @@ pub async fn create_test_connection_with_provider(
 }
 
 /// Creates a test sync job in the database.
+#[allow(dead_code)]
 pub async fn create_test_sync_job(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -247,6 +251,7 @@ pub async fn create_test_sync_job(
 }
 
 /// Creates a test sync job with specific attempt count in the database.
+#[allow(dead_code)]
 pub async fn create_test_sync_job_with_attempts(
     db: &DatabaseConnection,
     tenant_id: Uuid,
