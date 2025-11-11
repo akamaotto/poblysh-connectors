@@ -1,32 +1,35 @@
 /**
  * API routing abstraction layer for demo modes.
- * 
+ *
  * This module provides a unified interface for data operations that can work
  * with both mock data (generated locally) and real API calls to the Connectors service.
- * The appropriate implementation is selected based on the current demo mode.
+ * A singleton DemoApiClient is used to ensure consistent behavior and to align
+ * with the shared backend client OpenSpec.
  */
 
-import { 
-  DemoProvider, 
-  DemoConnection, 
-  DemoSignal, 
+import {
+  DemoProvider,
+  DemoConnection,
+  DemoSignal,
   DemoGroundedSignal,
   DemoSyncJob,
   DemoWebhook,
   DemoToken,
   DemoRateLimit,
   DemoApiResponse,
-  DemoApiError,
-  DemoMode
-} from './types';
-import { getDemoConfig } from './demoConfig';
+} from "./types";
+import { getDemoConfig } from "./demoConfig";
 
 // Import mock implementations
-import { generateMockProviders } from './mockData';
-import { MOCK_DELAYS } from './constants';
+import { generateMockProviders } from "./mockData";
+import { MOCK_DELAYS } from "./constants";
 
-// Import real API implementations (these will be implemented separately)
-// import * as realApiClient from './realApiClient';
+// Import shared backend client factories and wrapper
+import {
+  getSharedBackendClient,
+  createSharedBackendClient,
+} from "./sharedBackendClient";
+import { createSharedBackendClientWrapper } from "./sharedBackendClientWrapper";
 
 /**
  * Base API client interface that both mock and real implementations must follow.
@@ -34,26 +37,31 @@ import { MOCK_DELAYS } from './constants';
 export interface DemoApiClient {
   // Provider operations
   getProviders(): Promise<DemoApiResponse<DemoProvider[]>>;
-  
+
   // Connection operations
   getConnections(): Promise<DemoApiResponse<DemoConnection[]>>;
-  createConnection(connection: Omit<DemoConnection, 'id' | 'createdAt'>): Promise<DemoApiResponse<DemoConnection>>;
-  updateConnection(id: string, updates: Partial<DemoConnection>): Promise<DemoApiResponse<DemoConnection>>;
+  createConnection(
+    connection: Omit<DemoConnection, "id" | "createdAt">,
+  ): Promise<DemoApiResponse<DemoConnection>>;
+  updateConnection(
+    id: string,
+    updates: Partial<DemoConnection>,
+  ): Promise<DemoApiResponse<DemoConnection>>;
   deleteConnection(id: string): Promise<void>;
-  
+
   // Signal operations
   getSignals(): Promise<DemoApiResponse<DemoSignal[]>>;
   getGroundedSignals(): Promise<DemoApiResponse<DemoGroundedSignal[]>>;
-  
+
   // Sync job operations
   getSyncJobs(): Promise<DemoApiResponse<DemoSyncJob[]>>;
-  
+
   // Webhook operations
   getWebhooks(): Promise<DemoApiResponse<DemoWebhook[]>>;
-  
+
   // Token operations
   getTokens(): Promise<DemoApiResponse<DemoToken[]>>;
-  
+
   // Rate limit operations
   getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>>;
 }
@@ -65,14 +73,14 @@ export interface DemoApiClient {
 class MockApiClient implements DemoApiClient {
   private async mockDelay(ms?: number): Promise<void> {
     const delay = ms ?? MOCK_DELAYS.NORMAL;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
   async getProviders(): Promise<DemoApiResponse<DemoProvider[]>> {
     await this.mockDelay(MOCK_DELAYS.FAST);
-    
+
     const providers = generateMockProviders();
-    
+
     return {
       data: providers,
       meta: {
@@ -84,10 +92,10 @@ class MockApiClient implements DemoApiClient {
 
   async getConnections(): Promise<DemoApiResponse<DemoConnection[]>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would use mock data generators
     const connections: DemoConnection[] = [];
-    
+
     return {
       data: connections,
       meta: {
@@ -97,15 +105,17 @@ class MockApiClient implements DemoApiClient {
     };
   }
 
-  async createConnection(connection: Omit<DemoConnection, 'id' | 'createdAt'>): Promise<DemoApiResponse<DemoConnection>> {
+  async createConnection(
+    connection: Omit<DemoConnection, "id" | "createdAt">,
+  ): Promise<DemoApiResponse<DemoConnection>> {
     await this.mockDelay(MOCK_DELAYS.SLOW);
-    
+
     const newConnection: DemoConnection = {
       ...connection,
       id: `conn-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
-    
+
     return {
       data: newConnection,
       meta: {
@@ -115,20 +125,23 @@ class MockApiClient implements DemoApiClient {
     };
   }
 
-  async updateConnection(id: string, updates: Partial<DemoConnection>): Promise<DemoApiResponse<DemoConnection>> {
+  async updateConnection(
+    id: string,
+    updates: Partial<DemoConnection>,
+  ): Promise<DemoApiResponse<DemoConnection>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would update the mock data
     const updatedConnection: DemoConnection = {
       id,
-      tenantId: updates.tenantId ?? 'demo-tenant',
-      providerSlug: updates.providerSlug ?? 'github',
-      displayName: updates.displayName ?? 'Demo Connection',
-      status: updates.status ?? 'connected',
+      tenantId: updates.tenantId ?? "demo-tenant",
+      providerSlug: updates.providerSlug ?? "github",
+      displayName: updates.displayName ?? "Demo Connection",
+      status: updates.status ?? "connected",
       createdAt: new Date().toISOString(),
       ...updates,
     };
-    
+
     return {
       data: updatedConnection,
       meta: {
@@ -141,14 +154,16 @@ class MockApiClient implements DemoApiClient {
   async deleteConnection(id: string): Promise<void> {
     await this.mockDelay();
     // Mock implementation - no actual deletion needed
+    // In real implementation, id would be used to identify the connection to delete
+    void id; // Suppress unused variable warning
   }
 
   async getSignals(): Promise<DemoApiResponse<DemoSignal[]>> {
     await this.mockDelay(MOCK_DELAYS.SCAN);
-    
+
     // In a real implementation, this would generate mock signals
     const signals: DemoSignal[] = [];
-    
+
     return {
       data: signals,
       meta: {
@@ -160,10 +175,10 @@ class MockApiClient implements DemoApiClient {
 
   async getGroundedSignals(): Promise<DemoApiResponse<DemoGroundedSignal[]>> {
     await this.mockDelay(MOCK_DELAYS.GROUND);
-    
+
     // In a real implementation, this would generate mock grounded signals
     const groundedSignals: DemoGroundedSignal[] = [];
-    
+
     return {
       data: groundedSignals,
       meta: {
@@ -175,10 +190,10 @@ class MockApiClient implements DemoApiClient {
 
   async getSyncJobs(): Promise<DemoApiResponse<DemoSyncJob[]>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would generate mock sync jobs
     const syncJobs: DemoSyncJob[] = [];
-    
+
     return {
       data: syncJobs,
       meta: {
@@ -190,10 +205,10 @@ class MockApiClient implements DemoApiClient {
 
   async getWebhooks(): Promise<DemoApiResponse<DemoWebhook[]>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would generate mock webhooks
     const webhooks: DemoWebhook[] = [];
-    
+
     return {
       data: webhooks,
       meta: {
@@ -205,10 +220,10 @@ class MockApiClient implements DemoApiClient {
 
   async getTokens(): Promise<DemoApiResponse<DemoToken[]>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would generate mock tokens
     const tokens: DemoToken[] = [];
-    
+
     return {
       data: tokens,
       meta: {
@@ -220,10 +235,10 @@ class MockApiClient implements DemoApiClient {
 
   async getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>> {
     await this.mockDelay();
-    
+
     // In a real implementation, this would generate mock rate limits
     const rateLimits: DemoRateLimit[] = [];
-    
+
     return {
       data: rateLimits,
       meta: {
@@ -235,188 +250,132 @@ class MockApiClient implements DemoApiClient {
 }
 
 /**
- * Real API client implementation.
- * Makes actual HTTP requests to the Connectors API service.
+ * NOTE:
+ * The previous RealApiClient has been removed in favor of using the
+ * spec-compliant SharedBackendClient + SharedBackendClientWrapper.
+ * All real-mode behavior should go through those abstractions.
  */
-class RealApiClient implements DemoApiClient {
-  private baseUrl: string;
-  private tenantId: string;
 
-  constructor(baseUrl: string, tenantId: string = 'demo-tenant') {
-    this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
-    this.tenantId = tenantId;
-  }
+// Singleton instances
+let demoApiClientSingleton: DemoApiClient | null = null;
 
-  private async makeRequest<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<DemoApiResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
-    
-    const defaultHeaders = {
-      'Content-Type': 'application/json',
-      'X-Tenant-Id': this.tenantId,
-    };
-
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...defaultHeaders,
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    return {
-      data,
-      meta: {
-        requestId: response.headers.get('X-Request-Id') ?? `real-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        // Include pagination info if available in response headers
-        ...(response.headers.get('X-Total-Count') && {
-          pagination: {
-            page: parseInt(response.headers.get('X-Page') ?? '1'),
-            limit: parseInt(response.headers.get('X-Limit') ?? '50'),
-            total: parseInt(response.headers.get('X-Total-Count') ?? '0'),
-            totalPages: parseInt(response.headers.get('X-Total-Pages') ?? '1'),
-          },
-        }),
-      },
-    };
-  }
-
-  async getProviders(): Promise<DemoApiResponse<DemoProvider[]>> {
-    return this.makeRequest<DemoProvider[]>('/api/v1/providers');
-  }
-
-  async getConnections(): Promise<DemoApiResponse<DemoConnection[]>> {
-    return this.makeRequest<DemoConnection[]>('/api/v1/connections');
-  }
-
-  async createConnection(connection: Omit<DemoConnection, 'id' | 'createdAt'>): Promise<DemoApiResponse<DemoConnection>> {
-    return this.makeRequest<DemoConnection>('/api/v1/connections', {
-      method: 'POST',
-      body: JSON.stringify(connection),
-    });
-  }
-
-  async updateConnection(id: string, updates: Partial<DemoConnection>): Promise<DemoApiResponse<DemoConnection>> {
-    return this.makeRequest<DemoConnection>(`/api/v1/connections/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(updates),
-    });
-  }
-
-  async deleteConnection(id: string): Promise<void> {
-    await fetch(`${this.baseUrl}/api/v1/connections/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'X-Tenant-Id': this.tenantId,
-      },
-    });
-  }
-
-  async getSignals(): Promise<DemoApiResponse<DemoSignal[]>> {
-    return this.makeRequest<DemoSignal[]>('/api/v1/signals');
-  }
-
-  async getGroundedSignals(): Promise<DemoApiResponse<DemoGroundedSignal[]>> {
-    return this.makeRequest<DemoGroundedSignal[]>('/api/v1/signals/grounded');
-  }
-
-  async getSyncJobs(): Promise<DemoApiResponse<DemoSyncJob[]>> {
-    return this.makeRequest<DemoSyncJob[]>('/api/v1/sync-jobs');
-  }
-
-  async getWebhooks(): Promise<DemoApiResponse<DemoWebhook[]>> {
-    return this.makeRequest<DemoWebhook[]>('/api/v1/webhooks');
-  }
-
-  async getTokens(): Promise<DemoApiResponse<DemoToken[]>> {
-    return this.makeRequest<DemoToken[]>('/api/v1/tokens');
-  }
-
-  async getRateLimits(): Promise<DemoApiResponse<DemoRateLimit[]>> {
-    return this.makeRequest<DemoRateLimit[]>('/api/v1/rate-limits');
-  }
+/**
+ * Internal factory for the mock client (stateless).
+ */
+function createMockApiClient(): DemoApiClient {
+  return new MockApiClient();
 }
 
 /**
- * API router factory function.
- * Creates the appropriate API client based on the current demo mode.
- * 
- * @returns API client instance for the current mode
- * @throws Error if configuration is invalid for the selected mode
+ * Internal factory for the real client using the SharedBackendClient wrapper.
+ * This always goes through the shared backend client singleton to align with OpenSpec.
  */
-export function createApiClient(): DemoApiClient {
+function createRealApiClientFromSharedClient(): DemoApiClient {
   const config = getDemoConfig();
-  
-  if (!config.isValid) {
-    throw new Error(`Invalid configuration: ${config.errors.join(', ')}`);
+
+  if (!config.connectorsApiBaseUrl) {
+    throw new Error("Connectors API base URL is required for real mode");
   }
-  
-  switch (config.mode) {
-    case 'mock':
-      return new MockApiClient();
-      
-    case 'real':
-      if (!config.connectorsApiBaseUrl) {
-        throw new Error('Connectors API base URL is required for real mode');
-      }
-      return new RealApiClient(config.connectorsApiBaseUrl);
-      
-    default:
-      throw new Error(`Unsupported demo mode: ${config.mode}`);
-  }
+
+  const clientConfig = {
+    baseUrl: config.connectorsApiBaseUrl,
+    tenantId: config.tenantId || "demo-tenant",
+    authToken: config.connectorsApiToken,
+    timeout: config.apiTimeout || 30000,
+    enableLogging: config.enableApiLogging ?? true,
+    enableEducationalAnnotations: config.enableEducationalAnnotations ?? true,
+  };
+
+  // Ensure shared backend client is configured as a singleton
+  const sharedClient = createSharedBackendClient(clientConfig);
+  return createSharedBackendClientWrapper({
+    baseUrl: sharedClient["config"]?.baseUrl ?? clientConfig.baseUrl,
+    tenantId: sharedClient["config"]?.tenantId ?? clientConfig.tenantId,
+    authToken: sharedClient["config"]?.authToken ?? clientConfig.authToken,
+    timeout: sharedClient["config"]?.timeout ?? clientConfig.timeout,
+    enableLogging: clientConfig.enableLogging,
+    enableEducationalAnnotations: clientConfig.enableEducationalAnnotations,
+  });
 }
 
 /**
- * Convenience function to get the current API client instance.
- * This is the preferred way to access the API client in most cases.
- * 
- * @returns API client instance for the current mode
+ * Returns the singleton DemoApiClient for the current configuration.
+ * This enforces a single shared client per runtime and aligns with the shared
+ * backend client singleton semantics from OpenSpec.
  */
 export function getApiClient(): DemoApiClient {
-  return createApiClient();
+  const config = getDemoConfig();
+
+  if (!config.isValid) {
+    throw new Error(`Invalid configuration: ${config.errors.join(", ")}`);
+  }
+
+  // If we already have a client and the mode has not changed, reuse it.
+  if (!demoApiClientSingleton) {
+    if (config.mode === "mock") {
+      demoApiClientSingleton = createMockApiClient();
+    } else if (config.mode === "real") {
+      demoApiClientSingleton = createRealApiClientFromSharedClient();
+    } else {
+      throw new Error(`Unsupported demo mode: ${config.mode}`);
+    }
+  }
+
+  return demoApiClientSingleton;
+}
+
+/**
+ * Gets the shared backend client singleton for enhanced features.
+ *
+ * This function is spec-compliant:
+ * - It always returns a SharedBackendClient instance.
+ * - The client internally respects the current demo configuration and mode.
+ * - Components can rely on this being a singleton across the app runtime.
+ */
+export { getSharedBackendClient };
+
+/**
+ * Checks if the enhanced shared client features are available.
+ *
+ * @returns true if in real mode with shared client, false otherwise
+ */
+export function hasEnhancedFeatures(): boolean {
+  const config = getDemoConfig();
+  return config.mode === "real";
 }
 
 /**
  * Checks if the current mode uses mock data.
- * 
+ *
  * @returns true if in mock mode, false otherwise
  */
 export function isMockMode(): boolean {
   const config = getDemoConfig();
-  return config.mode === 'mock';
+  return config.mode === "mock";
 }
 
 /**
  * Checks if the current mode uses real API calls.
- * 
+ *
  * @returns true if in real mode, false otherwise
  */
 export function isRealMode(): boolean {
   const config = getDemoConfig();
-  return config.mode === 'real';
+  return config.mode === "real";
 }
 
 /**
  * Gets information about the current API mode for UI display purposes.
- * 
+ *
  * @returns Object with mode information
  */
 export function getApiModeInfo() {
   const config = getDemoConfig();
-  
+
   return {
     mode: config.mode,
-    isMock: config.mode === 'mock',
-    isReal: config.mode === 'real',
+    isMock: config.mode === "mock",
+    isReal: config.mode === "real",
     apiBaseUrl: config.connectorsApiBaseUrl,
     isValid: config.isValid,
     errors: config.errors,

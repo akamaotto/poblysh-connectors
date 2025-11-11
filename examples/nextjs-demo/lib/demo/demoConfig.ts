@@ -18,6 +18,18 @@ export interface RuntimeDemoConfig {
   mode: DemoMode;
   /** Connectors API base URL (for real mode) */
   connectorsApiBaseUrl?: string;
+  /** Connectors API authentication token (for real mode) */
+  connectorsApiToken?: string;
+  /** Tenant ID for multi-tenant requests */
+  tenantId?: string;
+  /** API request timeout in milliseconds */
+  apiTimeout?: number;
+  /** Maximum number of API retry attempts */
+  apiMaxRetries?: number;
+  /** Whether to enable API request logging */
+  enableApiLogging?: boolean;
+  /** Whether to enable educational annotations */
+  enableEducationalAnnotations?: boolean;
   /** Whether the configuration is valid */
   isValid: boolean;
   /** Configuration validation errors */
@@ -39,15 +51,6 @@ export const ENV_VARS = {
  */
 const ALLOWED_DEMO_MODES: DemoMode[] = ['mock', 'real'];
 
-/**
- * Default configuration values.
- */
-const DEFAULT_CONFIG: RuntimeDemoConfig = {
-  mode: 'mock',
-  isValid: true,
-  errors: [],
-  warnings: [],
-};
 
 /**
  * Validates a URL string.
@@ -127,32 +130,46 @@ function validateApiBaseUrl(baseUrl: string | undefined, mode: DemoMode): {
 export function loadDemoConfig(): RuntimeDemoConfig {
   const modeValue = process.env[ENV_VARS.DEMO_MODE];
   const baseUrlValue = process.env[ENV_VARS.CONNECTORS_API_BASE_URL];
-  
+
   // Validate demo mode
   const { mode, errors: modeErrors, warnings: modeWarnings } = validateDemoMode(modeValue);
-  
+
   // Validate API base URL
-  const { 
-    baseUrl: connectorsApiBaseUrl, 
-    errors: baseUrlErrors, 
-    warnings: baseUrlWarnings 
+  const {
+    baseUrl: connectorsApiBaseUrl,
+    errors: baseUrlErrors,
+    warnings: baseUrlWarnings
   } = validateApiBaseUrl(baseUrlValue, mode);
-  
+
+  // Get additional configuration from environment variables
+  const connectorsApiToken = process.env.CONNECTORS_API_TOKEN;
+  const tenantId = process.env.CONNECTORS_TENANT_ID || 'demo-tenant';
+  const apiTimeout = process.env.CONNECTORS_API_TIMEOUT ? parseInt(process.env.CONNECTORS_API_TIMEOUT, 10) : undefined;
+  const apiMaxRetries = process.env.CONNECTORS_API_MAX_RETRIES ? parseInt(process.env.CONNECTORS_API_MAX_RETRIES, 10) : undefined;
+  const enableApiLogging = process.env.CONNECTORS_ENABLE_API_LOGGING !== 'false';
+  const enableEducationalAnnotations = process.env.CONNECTORS_ENABLE_EDUCATIONAL !== 'false';
+
   // Combine errors and warnings
   const errors = [...modeErrors, ...baseUrlErrors];
   const warnings = [...modeWarnings, ...baseUrlWarnings];
-  
+
   // Determine if configuration is valid
   const isValid = errors.length === 0;
-  
+
   const config: RuntimeDemoConfig = {
     mode,
     connectorsApiBaseUrl,
+    connectorsApiToken,
+    tenantId,
+    apiTimeout,
+    apiMaxRetries,
+    enableApiLogging,
+    enableEducationalAnnotations,
     isValid,
     errors,
     warnings,
   };
-  
+
   return config;
 }
 

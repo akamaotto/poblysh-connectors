@@ -99,18 +99,23 @@ function createRandomForConnection(connection: DemoConnection): SeededRandom {
 export function generateMockProviders(): DemoProvider[] {
   return [
     {
-      slug: 'github',
-      name: 'GitHub',
-      description: 'Git repository hosting and collaboration platform',
-      iconUrl: 'https://github.com/favicon.ico',
-      supportedSignalKinds: ['code.push', 'code.pull_request', 'code.issue', 'code.release'],
-      authType: 'oauth2',
+      slug: "github",
+      name: "GitHub",
+      description: "Git repository hosting and collaboration platform",
+      iconUrl: "https://github.com/favicon.ico",
+      supportedSignalKinds: [
+        "code.push",
+        "code.pull_request",
+        "code.issue",
+        "code.release",
+      ],
+      authType: "oauth2",
       rateLimit: {
         requestsPerHour: 5000,
         requestsPerMinute: 60,
       },
-      webhookEvents: ['push', 'pull_request', 'issues', 'release'],
-      defaultScopes: ['repo', 'read:user', 'user:email'],
+      webhookEvents: ["push", "pull_request", "issues", "release"],
+      defaultScopes: ["repo", "read:user", "user:email"],
       features: {
         realtimeWebhooks: true,
         historicalSync: true,
@@ -119,18 +124,28 @@ export function generateMockProviders(): DemoProvider[] {
       },
     },
     {
-      slug: 'slack',
-      name: 'Slack',
-      description: 'Team communication and collaboration platform',
-      iconUrl: 'https://slack.com/favicon.ico',
-      supportedSignalKinds: ['message.post', 'message.reaction', 'channel.updated', 'user.updated'],
-      authType: 'oauth2',
+      slug: "slack",
+      name: "Slack",
+      description: "Team communication and collaboration platform",
+      iconUrl: "https://slack.com/favicon.ico",
+      supportedSignalKinds: [
+        "message.post",
+        "message.reaction",
+        "channel.updated",
+        "user.updated",
+      ],
+      authType: "oauth2",
       rateLimit: {
         requestsPerHour: 10000,
         requestsPerMinute: 100,
       },
-      webhookEvents: ['message', 'reaction_added', 'channel_created', 'team_join'],
-      defaultScopes: ['channels:read', 'chat:read', 'users:read'],
+      webhookEvents: [
+        "message",
+        "reaction_added",
+        "channel_created",
+        "team_join",
+      ],
+      defaultScopes: ["channels:read", "chat:read", "users:read"],
       features: {
         realtimeWebhooks: true,
         historicalSync: true,
@@ -139,17 +154,27 @@ export function generateMockProviders(): DemoProvider[] {
       },
     },
     {
-      slug: 'jira',
-      name: 'Jira',
-      description: 'Issue tracking and project management platform',
-      iconUrl: 'https://atlassian.com/favicon.ico',
-      supportedSignalKinds: ['issue.created', 'issue.updated', 'issue.transitioned', 'sprint.updated'],
-      authType: 'api_key',
+      slug: "jira",
+      name: "Jira",
+      description: "Issue tracking and project management platform",
+      iconUrl: "https://atlassian.com/favicon.ico",
+      supportedSignalKinds: [
+        "issue.created",
+        "issue.updated",
+        "issue.transitioned",
+        "sprint.updated",
+      ],
+      authType: "api_key",
       rateLimit: {
         requestsPerHour: 1000,
         requestsPerMinute: 30,
       },
-      webhookEvents: ['jira:issue_created', 'jira:issue_updated', 'sprint_started', 'sprint_closed'],
+      webhookEvents: [
+        "jira:issue_created",
+        "jira:issue_updated",
+        "sprint_started",
+        "sprint_closed",
+      ],
       defaultScopes: [],
       features: {
         realtimeWebhooks: true,
@@ -159,18 +184,32 @@ export function generateMockProviders(): DemoProvider[] {
       },
     },
     {
-      slug: 'google-workspace',
-      name: 'Google Workspace',
-      description: 'Productivity and collaboration suite',
-      iconUrl: 'https://google.com/favicon.ico',
-      supportedSignalKinds: ['document.created', 'document.updated', 'email.received', 'calendar.created'],
-      authType: 'oauth2',
+      slug: "google-workspace",
+      name: "Google Workspace",
+      description: "Productivity and collaboration suite",
+      iconUrl: "https://google.com/favicon.ico",
+      supportedSignalKinds: [
+        "document.created",
+        "document.updated",
+        "email.received",
+        "calendar.created",
+      ],
+      authType: "oauth2",
       rateLimit: {
         requestsPerHour: 10000,
         requestsPerMinute: 100,
       },
-      webhookEvents: ['document_created', 'document_updated', 'message_received', 'event_created'],
-      defaultScopes: ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar.readonly'],
+      webhookEvents: [
+        "document_created",
+        "document_updated",
+        "message_received",
+        "event_created",
+      ],
+      defaultScopes: [
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/calendar.readonly",
+      ],
       features: {
         realtimeWebhooks: true,
         historicalSync: true,
@@ -179,18 +218,28 @@ export function generateMockProviders(): DemoProvider[] {
       },
     },
     {
-      slug: 'zoho',
-      name: 'Zoho CRM',
-      description: 'Customer relationship management platform',
-      iconUrl: 'https://zoho.com/favicon.ico',
-      supportedSignalKinds: ['contact.created', 'contact.updated', 'deal.created', 'deal.updated'],
-      authType: 'hybrid',
+      slug: "zoho",
+      name: "Zoho CRM",
+      description: "Customer relationship management platform",
+      iconUrl: "https://zoho.com/favicon.ico",
+      supportedSignalKinds: [
+        "contact.created",
+        "contact.updated",
+        "deal.created",
+        "deal.updated",
+      ],
+      authType: "hybrid",
       rateLimit: {
         requestsPerHour: 5000,
         requestsPerMinute: 50,
       },
-      webhookEvents: ['Contacts.create', 'Contacts.edit', 'Deals.create', 'Deals.edit'],
-      defaultScopes: ['ZohoCRM.contacts.read', 'ZohoCRM.deals.read'],
+      webhookEvents: [
+        "Contacts.create",
+        "Contacts.edit",
+        "Deals.create",
+        "Deals.edit",
+      ],
+      defaultScopes: ["ZohoCRM.contacts.read", "ZohoCRM.deals.read"],
       features: {
         realtimeWebhooks: true,
         historicalSync: true,
@@ -213,8 +262,8 @@ export function generateMockUser(email: string, tenantId?: string): DemoUser {
       email: mockUser.email,
       name: mockUser.name,
       avatarUrl: mockUser.avatarUrl,
-      roles: [...(mockUser.roles || ['member'])],
-      tenantId: tenantId || generateId('default-tenant'),
+      roles: [...(mockUser.roles || ["member"])],
+      tenantId: tenantId || generateId("default-tenant"),
     };
   }
 
@@ -229,8 +278,8 @@ export function generateMockUser(email: string, tenantId?: string): DemoUser {
     email,
     name,
     avatarUrl: `https://avatar.vercel.sh/${encodeURIComponent(email)}`,
-    roles: ['member'],
-    tenantId: tenantId || generateId('default-tenant'),
+    roles: ["member"],
+    tenantId: tenantId || generateId("default-tenant"),
   };
 }
 
@@ -243,12 +292,16 @@ export function generateMockTenant(organizationName: string): DemoTenant {
   return {
     id: tenantId,
     name: organizationName,
-    slug: organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+    slug: organizationName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, ""),
     connectorsTenantId,
     createdAt: new Date(
       Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000,
     ).toISOString(),
-    plan: Math.random() > 0.7 ? 'pro' : Math.random() > 0.5 ? 'enterprise' : 'free',
+    plan:
+      Math.random() > 0.7 ? "pro" : Math.random() > 0.5 ? "enterprise" : "free",
   };
 }
 
@@ -1394,6 +1447,9 @@ export function generateMockSyncJobs(
     `${connection.tenantId}-${connection.providerSlug}-syncjobs`,
   );
   const jobCount = random.int(2, 8);
+  // Use a fixed, deterministic base timestamp instead of Date.now() so tests
+  // asserting equality between runs are stable.
+  const baseTimestamp = Date.UTC(2025, 10, 7, 15, 21, 22, 355); // 2025-11-07T15:21:22.355Z
   const jobs: DemoSyncJob[] = [];
 
   for (let i = 0; i < jobCount; i++) {
@@ -1409,7 +1465,7 @@ export function generateMockSyncJobs(
       "failed",
     ] as const);
     const createdAt = new Date(
-      Date.now() - random.int(1, 30) * 24 * 60 * 60 * 1000,
+      baseTimestamp - random.int(1, 30) * 24 * 60 * 60 * 1000,
     );
     const lastRunAt =
       status === "completed"
@@ -1429,7 +1485,9 @@ export function generateMockSyncJobs(
       lastRunAt: lastRunAt?.toISOString(),
       nextRunAt:
         status === "pending"
-          ? new Date(Date.now() + random.int(1, 60) * 60 * 1000).toISOString()
+          ? new Date(
+              baseTimestamp + random.int(1, 60) * 60 * 1000,
+            ).toISOString()
           : undefined,
       createdAt: createdAt.toISOString(),
       errorMessage:

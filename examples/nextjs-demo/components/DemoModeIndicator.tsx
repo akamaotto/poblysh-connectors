@@ -1,12 +1,11 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { useDemoConfig } from '@/lib/demo/state';
-import { getApiModeInfo } from '@/lib/demo/apiRouter';
+import React from "react";
+import { useDemoConfig } from "@/lib/demo/state";
 
 /**
  * Demo mode indicator component.
- * 
+ *
  * This component displays the current demo mode (mock vs real) and provides
  * configuration information for educational purposes. It helps developers
  * understand which mode they're currently using and whether the configuration
@@ -14,36 +13,40 @@ import { getApiModeInfo } from '@/lib/demo/apiRouter';
  */
 export function DemoModeIndicator() {
   const config = useDemoConfig();
-  const modeInfo = getApiModeInfo();
 
-  // Don't render in production or if configuration is not available
-  if (typeof window === 'undefined' || !config) {
+  // Don't render on the server to avoid SSR/client mismatches
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  // Also guard against missing config on initial render
+  if (!config) {
     return null;
   }
 
   const getModeColor = () => {
-    if (!config.isConfigValid) return 'bg-red-100 border-red-300 text-red-800';
-    return config.mode === 'mock' 
-      ? 'bg-blue-100 border-blue-300 text-blue-800'
-      : 'bg-green-100 border-green-300 text-green-800';
+    if (!config.isConfigValid) return "bg-red-100 border-red-300 text-red-800";
+    return config.mode === "mock"
+      ? "bg-blue-100 border-blue-300 text-blue-800"
+      : "bg-green-100 border-green-300 text-green-800";
   };
 
   const getModeIcon = () => {
-    if (!config.isConfigValid) return '⚠️';
-    return config.mode === 'mock' ? '🎭' : '🌐';
+    if (!config.isConfigValid) return "⚠️";
+    return config.mode === "mock" ? "🎭" : "🌐";
   };
 
   const getModeLabel = () => {
-    if (!config.isConfigValid) return 'Configuration Error';
-    return config.mode === 'mock' ? 'Mock Mode' : 'Real API Mode';
+    if (!config.isConfigValid) return "Configuration Error";
+    return config.mode === "mock" ? "Mock Mode" : "Real API Mode";
   };
 
   const getModeDescription = () => {
     if (!config.isConfigValid) {
-      return 'Demo configuration has errors that must be fixed';
+      return "Demo configuration has errors that must be fixed";
     }
-    return config.mode === 'mock' 
-      ? 'Using locally generated mock data'
+    return config.mode === "mock"
+      ? "Using locally generated mock data"
       : `Making real API calls to ${config.connectorsApiBaseUrl}`;
   };
 
@@ -57,13 +60,13 @@ export function DemoModeIndicator() {
             <p className="text-sm opacity-90">{getModeDescription()}</p>
           </div>
         </div>
-        
+
         <div className="text-right">
           <div className="text-xs font-medium uppercase tracking-wide opacity-75">
             Environment
           </div>
           <div className="text-sm font-semibold">
-            {process.env.NODE_ENV || 'development'}
+            {process.env.NODE_ENV || "development"}
           </div>
         </div>
       </div>
@@ -74,10 +77,11 @@ export function DemoModeIndicator() {
           <div>
             <span className="font-medium">Mode:</span> {config.mode}
           </div>
-          
+
           {config.connectorsApiBaseUrl && (
             <div>
-              <span className="font-medium">API URL:</span> {config.connectorsApiBaseUrl}
+              <span className="font-medium">API URL:</span>{" "}
+              {config.connectorsApiBaseUrl}
             </div>
           )}
 
@@ -111,12 +115,19 @@ export function DemoModeIndicator() {
           <strong>Development Note:</strong> This demo supports two modes:
         </p>
         <ul className="mt-1 ml-4 list-disc">
-          <li><strong>Mock Mode:</strong> Uses generated data, no API calls required</li>
-          <li><strong>Real Mode:</strong> Connects to actual Connectors API service</li>
+          <li>
+            <strong>Mock Mode:</strong> Uses generated data, no API calls
+            required
+          </li>
+          <li>
+            <strong>Real Mode:</strong> Connects to actual Connectors API
+            service
+          </li>
         </ul>
         <p className="mt-2">
-          Configure mode by setting <code>NEXT_PUBLIC_DEMO_MODE</code> in your environment.
-          See <code>.env.example</code> files for configuration examples.
+          Configure mode by setting <code>NEXT_PUBLIC_DEMO_MODE</code> in your
+          environment. See <code>.env.example</code> files for configuration
+          examples.
         </p>
       </div>
     </div>

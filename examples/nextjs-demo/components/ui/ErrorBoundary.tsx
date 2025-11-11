@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { Component, ErrorInfo, ReactNode } from "react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
 interface ErrorBoundaryState {
   hasError: boolean;
-  error?: Error;
-  errorInfo?: ErrorInfo;
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 export interface ErrorBoundaryProps {
@@ -19,18 +19,21 @@ export interface ErrorBoundaryProps {
  * ErrorBoundary component.
  * Catches JavaScript errors in its child component tree and displays a fallback UI.
  */
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, error: null, errorInfo: null };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
+    return { hasError: true, error, errorInfo: null };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    this.setState({ error, errorInfo });
+    this.setState({ error, errorInfo, hasError: true });
 
     // Call onError prop if provided
     if (this.props.onError) {
@@ -38,13 +41,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     // Log error in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error('ErrorBoundary caught an error:', error, errorInfo);
+    if (process.env.NODE_ENV === "development") {
+      console.error("ErrorBoundary caught an error:", error, errorInfo);
     }
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: undefined, errorInfo: undefined });
+    this.setState({ hasError: false, error: null, errorInfo: null });
   };
 
   render() {
@@ -67,10 +70,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             </h1>
 
             <p className="text-gray-600 mb-6">
-              We&apos;re sorry, but something unexpected happened. The error has been logged and we&apos;ll look into it.
+              We&apos;re sorry, but something unexpected happened. The error has
+              been logged and we&apos;ll look into it.
             </p>
 
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {process.env.NODE_ENV === "development" && this.state.error && (
               <details className="mb-6 text-left">
                 <summary className="cursor-pointer text-sm font-medium text-gray-700 mb-2">
                   Error Details (Development Only)
@@ -82,7 +86,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                   {this.state.error.stack && (
                     <div>
                       <strong>Stack:</strong>
-                      <pre className="whitespace-pre-wrap">{this.state.error.stack}</pre>
+                      <pre className="whitespace-pre-wrap">
+                        {this.state.error.stack}
+                      </pre>
                     </div>
                   )}
                 </div>

@@ -211,6 +211,116 @@ When assisting with frontend tasks:
 - Align with the enhanced mock domain model and state management defined under `examples/nextjs-demo/lib/demo/`.
 - Keep behavior and terminology in sync with backend specs from `openspec/specs` and `CLAUDE.md`.
 
+### **CRITICAL: TypeScript Type Safety Requirements**
+
+**MANDATORY**: All new TypeScript code in the Next.js demo MUST use functional programming patterns to eliminate `any` and `undefined` types.
+
+#### Required Tools
+All TypeScript development must use the functional types from `examples/nextjs-demo/lib/demo/types/functional.ts`:
+
+- **Result<E, A>**: Type-safe error handling that replaces exceptions
+- **Option<T>**: Null-safe value handling that replaces `T | undefined`
+- **AppError**: Domain-specific error types
+
+#### Strict Prohibitions
+**Absolutely FORBIDDEN in new code:**
+- ❌ `any` type - NEVER use under any circumstances
+- ❌ `T | undefined` unions - Use `Option<T>` instead
+- ❌ `T | null` unions - Use `Option<T>` instead
+- ❌ Throwing exceptions - Use `Result<Error, T>` instead
+- ❌ `@ts-ignore` - Fix types properly
+- ❌ `as any` - Use proper type guards
+
+#### Required Import Pattern
+```typescript
+import {
+  Result, Option, AppResult, AppError,
+  Ok, Err, Some, None,
+  map, flatMap, match, matchOption,
+  fromNullable, asyncResult,
+  NetworkError, ValidationError, AuthenticationError
+} from './lib/demo/types/functional';
+```
+
+#### Required Code Patterns
+
+**1. Functions Returning Optional Values**
+```typescript
+// ❌ FORBIDDEN
+function findUser(id: string): User | undefined {
+  return users.find(u => u.id === id);
+}
+
+// ✅ REQUIRED
+function findUser(id: string): Option<User> {
+  return fromNullable(users.find(u => u.id === id));
+}
+```
+
+**2. Async Functions with Error Handling**
+```typescript
+// ❌ FORBIDDEN
+async function fetchUser(id: string): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+// ✅ REQUIRED
+async function fetchUser(id: string): Promise<AppResult<User>> {
+  return asyncResult(
+    async () => {
+      const response = await fetch(`/api/users/${id}`);
+      if (!response.ok) {
+        return Err(NetworkError(`HTTP ${response.status}`, response.status));
+      }
+      return await response.json();
+    },
+    (error) => NetworkError(error.message)
+  );
+}
+```
+
+**3. Interface Definitions**
+```typescript
+// ❌ FORBIDDEN
+interface DemoConnection {
+  id: string;
+  status: 'connected' | 'disconnected';
+  lastSyncAt?: string;  // Optional field
+  error?: string;       // Optional field
+}
+
+// ✅ REQUIRED
+interface DemoConnection {
+  id: string;
+  status: 'connected' | 'disconnected';
+  lastSyncAt: Option<string>;  // Explicit Option type
+  error: Option<string>;       // Explicit Option type
+}
+```
+
+#### Documentation References
+- **Complete API**: `examples/nextjs-demo/lib/demo/types/functional.ts`
+- **Usage Examples**: `examples/nextjs-demo/lib/demo/examples/functional-integration.ts`
+- **Migration Guide**: `examples/nextjs-demo/lib/demo/migration-guide.md`
+- **Refactored Example**: `examples/nextjs-demo/lib/demo/refactored/sharedBackendClient.safe.ts`
+
+#### Code Review Requirements
+All code reviews must verify:
+1. No `any` types in new code
+2. No `T | undefined` unions in new interfaces
+3. Proper use of Result types for async operations
+4. Proper use of Option types for nullable values
+5. Complete pattern matching for all Result/Option consumption
+
+#### Migration Strategy
+For existing code that uses `any` or `undefined`:
+1. Start with new code - apply functional patterns to all new features
+2. Gradual migration - refactor existing code during maintenance
+3. Adapter pattern - wrap existing code to provide functional interfaces
+4. Document technical debt for any remaining legacy code
+
 ### Consistency Between AGENTS.md and CLAUDE.md
 
 - Both documents MUST:

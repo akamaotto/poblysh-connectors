@@ -1,0 +1,15 @@
+# Bun configuration for Next.js demo tests
+# This config ensures:
+# - React Testing Library runs with a DOM-like environment
+# - @testing-library/jest-dom matchers are available globally
+# - Minimal, explicit setup for Bun's test runner
+
+[default]
+# You can set global test options under the [test] table below.
+
+[test]
+# Use a Node-like environment; our setup file will polyfill DOM globals via jsdom.
+# (Bun currently doesn't expose a "jsdom" environment flag like Jest;
+# we wire jsdom ourselves in testSetup.ts.)
+root = "./"
+preload = ["./testSetup.ts"]

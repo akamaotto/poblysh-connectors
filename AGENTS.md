@@ -18,6 +18,22 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+## TypeScript Guidelines
+
+When working with TypeScript in this repository (including `examples/nextjs-demo` and any other TS/TSX code):
+
+- Do not use the `any` type. Always prefer precise, strongly typed alternatives such as:
+  - Specific primitives (`string`, `number`, `boolean`)
+  - Domain-specific interfaces, types, or enums
+  - Generics with concrete constraints
+  - Discriminated unions for variant data
+- Do not use the `undefined` type as an explicit annotation in public or internal APIs.
+  - For optional values, use optional properties (`foo?: T`) or `T | null` as appropriate.
+  - Model absence explicitly in the type system (e.g. union types, dedicated state objects) instead of relying on `undefined`.
+- If you believe `any` or `undefined` is necessary, reconsider the design and refactor toward a safer, more expressive type before proceeding.
+
+These constraints are intended to maintain a strictly typed, predictable codebase and should be followed consistently.
+
 ## Docker QA Guidance
 
 - When evaluating the dockerization effort (e.g., `add-dockerization-post-mvp`), follow the new guide in `README.md` under **Docker Build & Swagger UI Testing** before approving any change.

@@ -175,3 +175,167 @@ Frontend (Next.js demo):
 🔄 OAuth flows (pending)
 🔄 Token management (pending)
 🔄 Sync engine (pending)
+
+## TypeScript Guidelines
+
+When working in the `examples/nextjs-demo` frontend or any TypeScript code in this repo:
+
+### Functional Programming with Result and Option Types
+
+**CRITICAL**: This project uses functional programming patterns to eliminate `any` and `undefined` types. All new TypeScript code MUST use the functional types from `lib/demo/types/functional.ts`.
+
+#### Required Tools
+- **Result<E, A>**: Type-safe error handling that replaces exceptions and `any` types
+- **Option<T>**: Null-safe value handling that replaces `T | undefined` and `T | null`
+- **AppError**: Domain-specific error types for consistent error handling
+
+#### Import Required Types
+```typescript
+import {
+  Result, Option, AppResult, AppError,
+  Ok, Err, Some, None,
+  map, flatMap, match, matchOption,
+  fromNullable, asyncResult,
+  NetworkError, ValidationError, AuthenticationError
+} from './lib/demo/types/functional';
+```
+
+#### Mandatory Patterns
+
+**1. Replace Functions Returning undefined**
+```typescript
+// ❌ FORBIDDEN
+function findUser(id: string): User | undefined {
+  return users.find(u => u.id === id);
+}
+
+// ✅ REQUIRED
+function findUser(id: string): Option<User> {
+  return fromNullable(users.find(u => u.id === id));
+}
+```
+
+**2. Replace Functions That Throw Exceptions**
+```typescript
+// ❌ FORBIDDEN
+async function fetchUser(id: string): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+// ✅ REQUIRED
+async function fetchUser(id: string): Promise<AppResult<User>> {
+  return asyncResult(
+    async () => {
+      const response = await fetch(`/api/users/${id}`);
+      if (!response.ok) {
+        return Err(NetworkError(`HTTP ${response.status}`, response.status));
+      }
+      return await response.json();
+    },
+    (error) => NetworkError(error.message)
+  );
+}
+```
+
+**3. Replace Optional Interface Fields**
+```typescript
+// ❌ FORBIDDEN
+interface DemoConnection {
+  id: string;
+  status: 'connected' | 'disconnected';
+  lastSyncAt?: string;  // Optional field
+  error?: string;       // Optional field
+}
+
+// ✅ REQUIRED
+interface DemoConnection {
+  id: string;
+  status: 'connected' | 'disconnected';
+  lastSyncAt: Option<string>;  // Explicit Option type
+  error: Option<string>;       // Explicit Option type
+}
+```
+
+**4. Use Pattern Matching for Consumption**
+```typescript
+// ✅ REQUIRED for consuming Option types
+const message = matchOption({
+  Some: (user) => `Found user: ${user.name}`,
+  None: () => 'User not found'
+})(findUser('123'));
+
+// ✅ REQUIRED for consuming Result types
+const result = await fetchUser('123');
+const message = match({
+  Ok: (user) => `Successfully loaded ${user.name}`,
+  Err: (error) => `Failed to load user: ${error.message}`
+})(result);
+```
+
+#### Strict Prohibitions
+
+**Absolutely Forbidden in New Code:**
+- ❌ `any` type - NEVER use under any circumstances
+- ❌ `T | undefined` unions - Use `Option<T>` instead
+- ❌ `T | null` unions - Use `Option<T>` instead
+- ❌ Throwing exceptions - Use `Result<Error, T>` instead
+- ❌ `@ts-ignore` - Fix types properly
+- ❌ `as any` - Use proper type guards or Result/Option
+
+**Allowed Only in Migration/Adapter Code:**
+- `as any` only when wrapping external libraries that cannot be changed
+- `T | undefined` only when implementing external API contracts
+
+#### Migration Strategy for Existing Code
+
+When refactoring existing code that uses `any` or `undefined`:
+
+1. **Start with New Code**: Apply functional patterns to all new features
+2. **Gradual Migration**: Refactor existing code during maintenance
+3. **Adapter Pattern**: Wrap existing code to provide functional interfaces
+4. **Test Coverage**: Ensure all error paths are tested with Result types
+
+#### Available Helper Functions
+
+```typescript
+// Safe property access
+const safeGet = <T, K extends keyof T>(obj: T, key: K): Option<T[K]>
+
+// Safe array operations
+const safeHead = <T>(array: readonly T[]): Option<T>
+const safeFind = <T>(array: readonly T[], predicate: (item: T) => boolean): Option<T>
+
+// Safe async operations
+const safeAsync = <T>(operation: () => Promise<T>): Promise<AppResult<T>>
+const asyncResult = <T>(operation: () => Promise<T>, onError: (error: unknown) => AppError): Promise<AppResult<T>>
+
+// Type utilities
+const fromNullable = <T>(value: T | null | undefined): Option<T>
+const toUndefined = <T>(option: Option<T>): T | undefined
+```
+
+#### Documentation References
+
+- **Complete API**: `lib/demo/types/functional.ts`
+- **Usage Examples**: `lib/demo/examples/functional-integration.ts`
+- **Migration Guide**: `lib/demo/migration-guide.md`
+- **Refactored Example**: `lib/demo/refactored/sharedBackendClient.safe.ts`
+
+#### Quality Enforcement
+
+All code reviews must verify:
+1. No `any` types in new code
+2. No `T | undefined` unions in new interfaces
+3. Proper use of Result types for async operations
+4. Proper use of Option types for nullable values
+5. Complete pattern matching for all Result/Option consumption
+
+### Legacy TypeScript Support
+
+For existing code that hasn't been migrated yet:
+- Document the technical debt
+- Create migration tickets
+- Prioritize migration based on usage frequency and criticality
+- Use adapter patterns to provide functional interfaces to legacy code
